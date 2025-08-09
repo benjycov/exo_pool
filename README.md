@@ -35,6 +35,11 @@ A custom integration to connect your Zodiac iAqualink Exo pool system to Home As
 - **Diagnostic Information**: View hardware configuration (e.g., PH, ORP, VSP support) and status (e.g., Error State, Authentication Status, Connected) in the device info page.
 - **Dynamic Device Info**: Displays Serial Number and Software Version, updated periodically.
 
+## Compatibility
 
+Should work with any Zodiac Exo pool system, confirmed to work with:
+
+- Exo IQ LS (with Dual-link ORP & PH, and Zodiac VSP pump)
+- ??? Let me know what you get it working with!
 
 
