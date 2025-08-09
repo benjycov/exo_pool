@@ -1,9 +1,8 @@
 from homeassistant.config_entries import ConfigEntry, ConfigEntryNotReady
 from homeassistant.core import HomeAssistant
 import logging
-import aiohttp
 from .const import DOMAIN
-from .sensor import async_update_data  # Import to reuse authentication logic
+from .api import get_coordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -13,20 +12,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug("Setting up Exo Pool: %s", entry.data)
     hass.data.setdefault(DOMAIN, {})
 
-    # Perform initial authentication to ensure a valid token
+    # Initialize shared coordinator
     try:
-        session = aiohttp.ClientSession()
-        data = await async_update_data(
-            hass, entry, session
-        )  # Reuse sensor's update logic
-        await session.close()
+        await get_coordinator(hass, entry)
     except Exception as e:
-        _LOGGER.error("Initial authentication failed: %s", e)
-        raise ConfigEntryNotReady("Failed to authenticate Exo Pool") from e
+        _LOGGER.error("Initial coordinator setup failed: %s", e)
+        raise ConfigEntryNotReady("Failed to initialize Exo Pool coordinator") from e
 
+    # Forward setup to sensor, binary_sensor, switch, and number platforms
     try:
         await hass.config_entries.async_forward_entry_setups(
-            entry, ["sensor", "switch"]
+            entry, ["sensor", "binary_sensor", "switch", "number"]
         )
     except Exception as e:
         _LOGGER.error("Failed to set up platforms: %s", e)
@@ -38,8 +34,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     try:
         result = await hass.config_entries.async_unload_platforms(
-            entry, ["sensor", "switch"]
+            entry, ["sensor", "binary_sensor", "switch", "number"]
         )
+        if result and entry.entry_id in hass.data[DOMAIN]:
+            del hass.data[DOMAIN][entry.entry_id]
         _LOGGER.debug("Unloaded platforms for entry: %s", entry.entry_id)
         return result
     except Exception as e:
