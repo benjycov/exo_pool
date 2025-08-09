@@ -1,0 +1,26 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Exo Pool",
+        "description": "Enter your iAqualink email and password",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      },
+      "select_system": {
+        "title": "Select Your Pool System",
+        "description": "Choose the system you want to control.",
+        "data": {
+          "system": "System"
+        }
+      }
+    },
+    "error": {
+      "auth_failed": "Login failed. Check email/password.",
+      "unknown": "An unknown error occurred.",
+      "no_systems": "No pool systems found for this account."
+    }
+  }
+}
