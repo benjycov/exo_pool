@@ -3,9 +3,16 @@
   "name": "Exo Pool",
   "version": "0.0.3",
   "documentation": "https://github.com/benjycov/exo_pool",
-  "requirements": ["aiohttp>=3.8.0"],
-  "codeowners": ["@benjycov"],
+  "requirements": [
+    "aiohttp>=3.8.0"
+  ],
+  "codeowners": [
+    "@benjycov"
+  ],
   "config_flow": true,
   "iot_class": "cloud_polling",
-  "platforms": ["sensor", "switch"]
+  "platforms": [
+    "sensor",
+    "switch"
+  ]
 }
