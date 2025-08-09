@@ -152,6 +152,7 @@ class ExoPoolConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     "serial_number"
                 )
                 for s in result
+                if s.get("device_type") == "exo"
             }
 
             if user_input:
