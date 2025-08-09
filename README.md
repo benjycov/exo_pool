@@ -37,6 +37,4 @@ A custom integration to connect your Zodiac iAqualink Exo pool system to Home As
 
 
 
-## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
