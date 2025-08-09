@@ -1,0 +1,11 @@
+# Ignore everything except integration code
+custom_components/exo_pool/.storage/
+custom_components/exo_pool/*.db
+custom_components/exo_pool/*.log
+custom_components/exo_pool/secrets.yaml
+custom_components/exo_pool/configuration.yaml
+custom_components/exo_pool/automations.yaml
+custom_components/exo_pool/scripts.yaml
+custom_components/exo_pool/scenes.yaml
+custom_components/exo_pool/blueprints/
+custom_components/exo_pool/home-assistant*
