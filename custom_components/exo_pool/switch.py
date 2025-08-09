@@ -5,6 +5,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .api import get_coordinator, set_pool_value, DOMAIN
 import logging
+import asyncio
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,12 +60,9 @@ class ORPBoostSwitch(CoordinatorEntity, SwitchEntity):
     @property
     def is_on(self):
         """Return the state of the ORP Boost."""
-        boost_time = (
-            self.coordinator.data.get("equipment", {})
-            .get("swc_0", {})
-            .get("boost_time")
+        return bool(
+            self.coordinator.data.get("equipment", {}).get("swc_0", {}).get("boost")
         )
-        return bool(boost_time) and boost_time != "00:00" if boost_time else False
 
     @property
     def available(self):
@@ -77,11 +75,15 @@ class ORPBoostSwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_on(self):
         """Turn on the ORP Boost."""
-        await set_pool_value(self.hass, self._entry, "boost", 1)
+        await set_pool_value(self.hass, self._entry, "boost", 1, delay_refresh=True)
+        self._attr_is_on = True  # Optimistic update
+        self.async_write_ha_state()
 
     async def async_turn_off(self):
         """Turn off the ORP Boost."""
-        await set_pool_value(self.hass, self._entry, "boost", 0)
+        await set_pool_value(self.hass, self._entry, "boost", 0, delay_refresh=True)
+        self._attr_is_on = False  # Optimistic update
+        self.async_write_ha_state()
 
 
 class PowerStateSwitch(CoordinatorEntity, SwitchEntity):
@@ -105,10 +107,7 @@ class PowerStateSwitch(CoordinatorEntity, SwitchEntity):
     def is_on(self):
         """Return the state of the Power."""
         return bool(
-            self.coordinator.data.get("equipment", {})
-            .get("swc_0", {})
-            .get("filter_pump", {})
-            .get("state")
+            self.coordinator.data.get("equipment", {}).get("swc_0", {}).get("exo_state")
         )
 
     @property
@@ -122,11 +121,15 @@ class PowerStateSwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_on(self):
         """Turn on the Power."""
-        await set_pool_value(self.hass, self._entry, "exo_state", 1)
+        await set_pool_value(self.hass, self._entry, "exo_state", 1, delay_refresh=True)
+        self._attr_is_on = True  # Optimistic update
+        self.async_write_ha_state()
 
     async def async_turn_off(self):
         """Turn off the Power."""
-        await set_pool_value(self.hass, self._entry, "exo_state", 0)
+        await set_pool_value(self.hass, self._entry, "exo_state", 0, delay_refresh=True)
+        self._attr_is_on = False  # Optimistic update
+        self.async_write_ha_state()
 
 
 class ProductionSwitch(CoordinatorEntity, SwitchEntity):
@@ -166,11 +169,19 @@ class ProductionSwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_on(self):
         """Turn on the Production."""
-        await set_pool_value(self.hass, self._entry, "production", 1)
+        await set_pool_value(
+            self.hass, self._entry, "production", 1, delay_refresh=True
+        )
+        self._attr_is_on = True  # Optimistic update
+        self.async_write_ha_state()
 
     async def async_turn_off(self):
         """Turn off the Production."""
-        await set_pool_value(self.hass, self._entry, "production", 0)
+        await set_pool_value(
+            self.hass, self._entry, "production", 0, delay_refresh=True
+        )
+        self._attr_is_on = False  # Optimistic update
+        self.async_write_ha_state()
 
 
 class Aux1Switch(CoordinatorEntity, SwitchEntity):
@@ -211,11 +222,19 @@ class Aux1Switch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_on(self):
         """Turn on Aux 1."""
-        await set_pool_value(self.hass, self._entry, "aux_1", 1)
+        await set_pool_value(
+            self.hass, self._entry, "aux_1.state", 1, delay_refresh=True
+        )
+        self._attr_is_on = True  # Optimistic update
+        self.async_write_ha_state()
 
     async def async_turn_off(self):
         """Turn off Aux 1."""
-        await set_pool_value(self.hass, self._entry, "aux_1", 0)
+        await set_pool_value(
+            self.hass, self._entry, "aux_1.state", 0, delay_refresh=True
+        )
+        self._attr_is_on = False  # Optimistic update
+        self.async_write_ha_state()
 
 
 class Aux2Switch(CoordinatorEntity, SwitchEntity):
@@ -256,11 +275,19 @@ class Aux2Switch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_on(self):
         """Turn on Aux 2."""
-        await set_pool_value(self.hass, self._entry, "aux_2", 1)
+        await set_pool_value(
+            self.hass, self._entry, "aux_2.state", 1, delay_refresh=True
+        )
+        self._attr_is_on = True  # Optimistic update
+        self.async_write_ha_state()
 
     async def async_turn_off(self):
         """Turn off Aux 2."""
-        await set_pool_value(self.hass, self._entry, "aux_2", 0)
+        await set_pool_value(
+            self.hass, self._entry, "aux_2.state", 0, delay_refresh=True
+        )
+        self._attr_is_on = False  # Optimistic update
+        self.async_write_ha_state()
 
 
 class SWCLowSwitch(CoordinatorEntity, SwitchEntity):
@@ -298,8 +325,12 @@ class SWCLowSwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_on(self):
         """Turn on SWC Low."""
-        await set_pool_value(self.hass, self._entry, "swc_low", 1)
+        await set_pool_value(self.hass, self._entry, "swc_low", 1, delay_refresh=True)
+        self._attr_is_on = True  # Optimistic update
+        self.async_write_ha_state()
 
     async def async_turn_off(self):
         """Turn off SWC Low."""
-        await set_pool_value(self.hass, self._entry, "swc_low", 0)
+        await set_pool_value(self.hass, self._entry, "swc_low", 0, delay_refresh=True)
+        self._attr_is_on = False  # Optimistic update
+        self.async_write_ha_state()

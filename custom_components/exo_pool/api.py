@@ -3,6 +3,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from datetime import timedelta
 import aiohttp
+import asyncio
 import async_timeout
 import logging
 import time
@@ -14,6 +15,7 @@ LOGIN_URL = "https://prod.zodiac-io.com/users/v1/login"
 REFRESH_URL = "https://prod.zodiac-io.com/users/v1/refresh"
 DATA_URL_TEMPLATE = "https://prod.zodiac-io.com/devices/v1/{}/shadow"
 API_KEY_PROD = "EOOEMOW4YR6QNB11"
+API_KEY_R = "EOOEMOW4YR6QNB07"
 
 # Error code translation
 ERROR_CODES = {
@@ -214,7 +216,7 @@ async def get_coordinator(hass: HomeAssistant, entry: ConfigEntry):
     return hass.data[DOMAIN][entry.entry_id]["coordinator"]
 
 
-async def set_pool_value(hass, entry, setting, value):
+async def set_pool_value(hass, entry, setting, value, delay_refresh=False):
     """Set a pool setting value via the API."""
     serial_number = entry.data["serial_number"]
     id_token = entry.data.get("id_token")
@@ -222,7 +224,17 @@ async def set_pool_value(hass, entry, setting, value):
         _LOGGER.error("No id_token available for setting %s", setting)
         return
 
-    payload = {"state": {"desired": {"equipment": {"swc_0": {setting: value}}}}}
+    # Build nested dict for setting
+    def build_nested_dict(keys, val):
+        d = val
+        for key in reversed(keys):
+            d = {key: d}
+        return d
+
+    keys = setting.split(".")
+    nested_value = build_nested_dict(keys, value)
+
+    payload = {"state": {"desired": {"equipment": {"swc_0": nested_value}}}}
     headers = {
         "Content-Type": "application/json; charset=utf-8",
         "User-Agent": "okhttp/3.14.7",
@@ -252,6 +264,11 @@ async def set_pool_value(hass, entry, setting, value):
                 )
             else:
                 _LOGGER.debug("Successfully set %s to %s", setting, value)
-                # Refresh coordinator to reflect updated state
-                coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-                await coordinator.async_request_refresh()
+                # Refresh coordinator with delay if requested
+                if delay_refresh:
+                    await asyncio.sleep(10)  # Wait 10 seconds for Exo to update
+                    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+                    await coordinator.async_request_refresh()
+                else:
+                    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+                    await coordinator.async_request_refresh()
