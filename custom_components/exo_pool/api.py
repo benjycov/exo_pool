@@ -5,11 +5,13 @@ from datetime import timedelta
 import aiohttp
 import async_timeout
 import logging
+import time
 
 _LOGGER = logging.getLogger(__name__)
 
 # API endpoints and keys from config_flow.py and REST sensors
 LOGIN_URL = "https://prod.zodiac-io.com/users/v1/login"
+REFRESH_URL = "https://prod.zodiac-io.com/users/v1/refresh"
 DATA_URL_TEMPLATE = "https://prod.zodiac-io.com/devices/v1/{}/shadow"
 API_KEY_PROD = "EOOEMOW4YR6QNB11"
 
@@ -38,66 +40,33 @@ async def async_update_data(hass: HomeAssistant, entry: ConfigEntry):
     _last_auth_error = None
     serial_number = entry.data["serial_number"]
     id_token = entry.data.get("id_token")
+    expires_at = entry.data.get("expires_at", 0)
 
     async with aiohttp.ClientSession() as session:
-        # Refresh token if missing or expired
+        # Refresh token if missing, expired, or about to expire
         if (
             not id_token
             or _last_auth_error == '{"message":"The incoming token has expired"}'
+            or time.time() > expires_at
         ):
             _LOGGER.debug(
-                "Refreshing authentication tokens due to missing or expired token"
+                "Refreshing authentication tokens due to missing, expired, or upcoming expiration"
             )
-            headers = {
-                "Content-Type": "application/json",
-                "User-Agent": "okhttp/3.14.7",
-            }
-            payload = {
-                "api_key": API_KEY_PROD,
-                "email": entry.data["email"],
-                "password": entry.data["password"],
-            }
-            _LOGGER.debug("Login payload: %s", {**payload, "password": "REDACTED"})
-            async with session.post(
-                LOGIN_URL, json=payload, headers=headers
-            ) as response:
-                _LOGGER.debug("Login response status: %s", response.status)
-                if response.status != 200:
-                    error_text = await response.text()
-                    _LOGGER.error("Failed to authenticate: %s", error_text)
-                    _authentication_failed = True
-                    _last_auth_error = error_text
-                    raise Exception(f"Authentication failed: {error_text}")
-                data = await response.json()
-                _LOGGER.debug(
-                    "Login response data: %s",
-                    {
-                        k: v if k != "id_token" else v[:10] + "..."
-                        for k, v in data.items()
-                    },
-                )
-                id_token = data.get("userPoolOAuth", {}).get("IdToken")
-                auth_token = data.get("authentication_token")
-                user_id = data.get("id")
-                if not id_token:
-                    _LOGGER.error("No userPoolOAuth.IdToken in response: %s", data)
-                    _authentication_failed = True
-                    _last_auth_error = "No userPoolOAuth.IdToken received"
-                    raise Exception("No userPoolOAuth.IdToken received")
-                if not auth_token:
-                    _LOGGER.error("No authentication_token in response: %s", data)
-                    _authentication_failed = True
-                    _last_auth_error = "No authentication_token received"
-                    raise Exception("No authentication_token received")
-                hass.config_entries.async_update_entry(
-                    entry,
-                    data={
-                        **entry.data,
-                        "id_token": id_token,
-                        "auth_token": auth_token,
-                        "user_id": user_id,
-                    },
-                )
+            refreshed = False
+            if "refresh_token" in entry.data:
+                # Try refresh first
+                try:
+                    refreshed = await _refresh_token(hass, entry, session)
+                except Exception as e:
+                    _LOGGER.debug(
+                        "Token refresh failed: %s, falling back to full login", e
+                    )
+
+            if not refreshed:
+                # Full login
+                await _full_login(hass, entry, session)
+
+            id_token = entry.data.get("id_token")  # Update after refresh/login
 
         # Fetch device data
         headers = {
@@ -121,6 +90,106 @@ async def async_update_data(hass: HomeAssistant, entry: ConfigEntry):
             data = await response.json()
             _LOGGER.debug("Device data: %s", data)
             return data.get("state", {}).get("reported", {})
+
+
+async def _full_login(
+    hass: HomeAssistant, entry: ConfigEntry, session: aiohttp.ClientSession
+):
+    """Perform full login with email and password."""
+    headers = {"Content-Type": "application/json", "User-Agent": "okhttp/3.14.7"}
+    payload = {
+        "api_key": API_KEY_PROD,
+        "email": entry.data["email"],
+        "password": entry.data["password"],
+    }
+    _LOGGER.debug("Login payload: %s", {**payload, "password": "REDACTED"})
+    async with session.post(LOGIN_URL, json=payload, headers=headers) as response:
+        _LOGGER.debug("Login response status: %s", response.status)
+        if response.status != 200:
+            error_text = await response.text()
+            _LOGGER.error("Failed to authenticate: %s", error_text)
+            global _authentication_failed, _last_auth_error
+            _authentication_failed = True
+            _last_auth_error = error_text
+            raise Exception(f"Authentication failed: {error_text}")
+        data = await response.json()
+        _LOGGER.debug(
+            "Login response data: %s",
+            {k: v if k != "id_token" else v[:10] + "..." for k, v in data.items()},
+        )
+        id_token = data.get("userPoolOAuth", {}).get("IdToken")
+        refresh_token = data.get("userPoolOAuth", {}).get("RefreshToken")
+        auth_token = data.get("authentication_token")
+        user_id = data.get("id")
+        expires_in = data.get("userPoolOAuth", {}).get(
+            "ExpiresIn", 3600
+        )  # Default to 1 hour if not present
+        if not id_token:
+            _LOGGER.error("No userPoolOAuth.IdToken in response: %s", data)
+            _authentication_failed = True
+            _last_auth_error = "No userPoolOAuth.IdToken received"
+            raise Exception("No userPoolOAuth.IdToken received")
+        if not auth_token:
+            _LOGGER.error("No authentication_token in response: %s", data)
+            _authentication_failed = True
+            _last_auth_error = "No authentication_token received"
+            raise Exception("No authentication_token received")
+        update_data = {
+            **entry.data,
+            "id_token": id_token,
+            "auth_token": auth_token,
+            "user_id": user_id,
+            "expires_at": time.time()
+            + expires_in
+            - 60,  # Refresh 1 min before expiration
+        }
+        if refresh_token:
+            update_data["refresh_token"] = refresh_token
+        hass.config_entries.async_update_entry(entry, data=update_data)
+
+
+async def _refresh_token(
+    hass: HomeAssistant, entry: ConfigEntry, session: aiohttp.ClientSession
+) -> bool:
+    """Refresh token using refresh_token."""
+    headers = {"Content-Type": "application/json", "User-Agent": "okhttp/3.14.7"}
+    payload = {
+        "email": entry.data["email"],
+        "refresh_token": entry.data["refresh_token"],
+    }
+    _LOGGER.debug("Refresh token payload: %s", {**payload, "refresh_token": "REDACTED"})
+    async with session.post(REFRESH_URL, json=payload, headers=headers) as response:
+        _LOGGER.debug("Refresh response status: %s", response.status)
+        if response.status != 200:
+            error_text = await response.text()
+            _LOGGER.error("Failed to refresh token: %s", error_text)
+            return False
+        data = await response.json()
+        _LOGGER.debug(
+            "Refresh response data: %s",
+            {k: v if k != "id_token" else v[:10] + "..." for k, v in data.items()},
+        )
+        id_token = data.get("userPoolOAuth", {}).get("IdToken")
+        refresh_token = data.get("userPoolOAuth", {}).get(
+            "RefreshToken"
+        )  # May not be present
+        auth_token = data.get("authentication_token")
+        user_id = data.get("id")
+        expires_in = data.get("userPoolOAuth", {}).get("ExpiresIn", 3600)
+        if not id_token:
+            _LOGGER.error("No userPoolOAuth.IdToken in refresh response: %s", data)
+            return False
+        update_data = {
+            **entry.data,
+            "id_token": id_token,
+            "auth_token": auth_token,
+            "user_id": user_id,
+            "expires_at": time.time() + expires_in - 60,
+        }
+        if refresh_token:
+            update_data["refresh_token"] = refresh_token
+        hass.config_entries.async_update_entry(entry, data=update_data)
+        return True
 
 
 async def get_coordinator(hass: HomeAssistant, entry: ConfigEntry):

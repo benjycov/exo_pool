@@ -1,46 +1,59 @@
-import logging
-
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-
-from .api import DOMAIN, get_coordinator, set_pool_value
+from .api import get_coordinator, set_pool_value, DOMAIN
+import logging
 
 _LOGGER = logging.getLogger(__name__)
+
+try:
+    from .api import get_coordinator, set_pool_value, DOMAIN
+
+    _LOGGER.debug(
+        "Successfully imported get_coordinator, set_pool_value, DOMAIN from .api"
+    )
+except ImportError as e:
+    _LOGGER.error("Failed to import from .api: %s", e)
+    raise
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up the switch platform for Exo Pool."""
+    _LOGGER.debug("Setting up switch platform for entry: %s", entry.entry_id)
     # Retrieve shared coordinator
     coordinator = await get_coordinator(hass, entry)
 
     # Add switch entities
     entities = [
-        ExoPoolORPBoostSwitch(entry, coordinator),
-        ExoPoolPowerStateSwitch(entry, coordinator),
-        ExoPoolProductionSwitch(entry, coordinator),
+        ORPBoostSwitch(entry, coordinator),
+        PowerStateSwitch(entry, coordinator),
+        ProductionSwitch(entry, coordinator),
+        Aux1Switch(entry, coordinator),
+        Aux2Switch(entry, coordinator),
+        SWCLowSwitch(entry, coordinator),
     ]
     async_add_entities(entities)
 
 
-class ExoPoolORPBoostSwitch(CoordinatorEntity, SwitchEntity):
-    """Representation of an Exo Pool ORP Boost switch."""
+class ORPBoostSwitch(CoordinatorEntity, SwitchEntity):
+    """Representation of an ORP Boost switch."""
 
     _attr_icon = "mdi:water-pump"
 
     def __init__(self, entry: ConfigEntry, coordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Pool ORP Boost"
+        self._attr_name = "ORP Boost"
         self._attr_unique_id = f"{entry.entry_id}_orp_boost"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Exo Pool",
-            "manufacturer": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
         }
 
     @property
@@ -71,25 +84,26 @@ class ExoPoolORPBoostSwitch(CoordinatorEntity, SwitchEntity):
         await set_pool_value(self.hass, self._entry, "boost", 0)
 
 
-class ExoPoolPowerStateSwitch(CoordinatorEntity, SwitchEntity):
-    """Representation of an Exo Pool Power State switch."""
+class PowerStateSwitch(CoordinatorEntity, SwitchEntity):
+    """Representation of a Power State switch."""
 
     _attr_icon = "mdi:power"
 
     def __init__(self, entry: ConfigEntry, coordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Exo Power State"
+        self._attr_name = "Power State"
         self._attr_unique_id = f"{entry.entry_id}_exo_state"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Exo Pool",
-            "manufacturer": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
         }
 
     @property
     def is_on(self):
-        """Return the state of the Exo Power."""
+        """Return the state of the Power."""
         return bool(
             self.coordinator.data.get("equipment", {})
             .get("swc_0", {})
@@ -107,28 +121,29 @@ class ExoPoolPowerStateSwitch(CoordinatorEntity, SwitchEntity):
         )
 
     async def async_turn_on(self):
-        """Turn on the Exo Power."""
+        """Turn on the Power."""
         await set_pool_value(self.hass, self._entry, "exo_state", 1)
 
     async def async_turn_off(self):
-        """Turn off the Exo Power."""
+        """Turn off the Power."""
         await set_pool_value(self.hass, self._entry, "exo_state", 0)
 
 
-class ExoPoolProductionSwitch(CoordinatorEntity, SwitchEntity):
-    """Representation of an Exo Pool Production switch."""
+class ProductionSwitch(CoordinatorEntity, SwitchEntity):
+    """Representation of a Production switch."""
 
     _attr_icon = "mdi:water-plus"
 
     def __init__(self, entry: ConfigEntry, coordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Exo Production"
+        self._attr_name = "Production"
         self._attr_unique_id = f"{entry.entry_id}_production"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Exo Pool",
-            "manufacturer": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
         }
 
     @property
@@ -156,3 +171,135 @@ class ExoPoolProductionSwitch(CoordinatorEntity, SwitchEntity):
     async def async_turn_off(self):
         """Turn off the Production."""
         await set_pool_value(self.hass, self._entry, "production", 0)
+
+
+class Aux1Switch(CoordinatorEntity, SwitchEntity):
+    """Representation of an Aux 1 switch."""
+
+    _attr_icon = "mdi:toggle-switch"
+
+    def __init__(self, entry: ConfigEntry, coordinator):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_name = "Aux 1"
+        self._attr_unique_id = f"{entry.entry_id}_aux_1"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
+        }
+
+    @property
+    def is_on(self):
+        """Return the state of Aux 1."""
+        return bool(
+            self.coordinator.data.get("equipment", {})
+            .get("swc_0", {})
+            .get("aux_1", {})
+            .get("state")
+        )
+
+    @property
+    def available(self):
+        """Return availability based on coordinator data."""
+        return (
+            self.coordinator.data is not None
+            and "equipment" in self.coordinator.data
+            and "swc_0" in self.coordinator.data["equipment"]
+        )
+
+    async def async_turn_on(self):
+        """Turn on Aux 1."""
+        await set_pool_value(self.hass, self._entry, "aux_1", 1)
+
+    async def async_turn_off(self):
+        """Turn off Aux 1."""
+        await set_pool_value(self.hass, self._entry, "aux_1", 0)
+
+
+class Aux2Switch(CoordinatorEntity, SwitchEntity):
+    """Representation of an Aux 2 switch."""
+
+    _attr_icon = "mdi:toggle-switch"
+
+    def __init__(self, entry: ConfigEntry, coordinator):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_name = "Aux 2"
+        self._attr_unique_id = f"{entry.entry_id}_aux_2"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
+        }
+
+    @property
+    def is_on(self):
+        """Return the state of Aux 2."""
+        return bool(
+            self.coordinator.data.get("equipment", {})
+            .get("swc_0", {})
+            .get("aux_2", {})
+            .get("state")
+        )
+
+    @property
+    def available(self):
+        """Return availability based on coordinator data."""
+        return (
+            self.coordinator.data is not None
+            and "equipment" in self.coordinator.data
+            and "swc_0" in self.coordinator.data["equipment"]
+        )
+
+    async def async_turn_on(self):
+        """Turn on Aux 2."""
+        await set_pool_value(self.hass, self._entry, "aux_2", 1)
+
+    async def async_turn_off(self):
+        """Turn off Aux 2."""
+        await set_pool_value(self.hass, self._entry, "aux_2", 0)
+
+
+class SWCLowSwitch(CoordinatorEntity, SwitchEntity):
+    """Representation of a SWC Low switch."""
+
+    _attr_icon = "mdi:water-minus"
+
+    def __init__(self, entry: ConfigEntry, coordinator):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_name = "SWC Low"
+        self._attr_unique_id = f"{entry.entry_id}_swc_low"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
+        }
+
+    @property
+    def is_on(self):
+        """Return the state of SWC Low."""
+        return bool(
+            self.coordinator.data.get("equipment", {}).get("swc_0", {}).get("swc_low")
+        )
+
+    @property
+    def available(self):
+        """Return availability based on coordinator data."""
+        return (
+            self.coordinator.data is not None
+            and "equipment" in self.coordinator.data
+            and "swc_0" in self.coordinator.data["equipment"]
+        )
+
+    async def async_turn_on(self):
+        """Turn on SWC Low."""
+        await set_pool_value(self.hass, self._entry, "swc_low", 1)
+
+    async def async_turn_off(self):
+        """Turn off SWC Low."""
+        await set_pool_value(self.hass, self._entry, "swc_low", 0)

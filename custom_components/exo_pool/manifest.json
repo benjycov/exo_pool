@@ -1,8 +1,9 @@
 {
   "domain": "exo_pool",
   "name": "Exo Pool",
-  "version": "0.0.3",
+  "version": "0.0.5",
   "documentation": "https://github.com/benjycov/exo_pool",
+  "issue_tracker": "https://github.com/benjycov/exo_pool/issues",
   "requirements": [
     "aiohttp>=3.8.0"
   ],
@@ -11,8 +12,9 @@
   ],
   "config_flow": true,
   "iot_class": "cloud_polling",
-  "platforms": [
-    "sensor",
-    "switch"
-  ]
+  "loggers": [
+    "custom_components.exo_pool",
+    "homeassistant.components.integration"
+  ],
+  "integration_type": "hub"
 }

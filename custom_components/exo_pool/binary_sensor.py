@@ -5,7 +5,11 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.update_coordinator import (
+    DataUpdateCoordinator,
+    CoordinatorEntity,
+)
+import logging
 from .api import (
     get_coordinator,
     ERROR_CODES,
@@ -13,7 +17,7 @@ from .api import (
     _last_auth_error,
     DOMAIN,
 )
-import logging
+from homeassistant.const import EntityCategory
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,31 +31,32 @@ async def async_setup_entry(
 
     # Add binary sensors
     entities = [
-        ExoPoolFilterPumpBinarySensor(entry, coordinator),
-        ExoPoolErrorStateBinarySensor(entry, coordinator),
-        ExoPoolSaltWaterChlorinatorBinarySensor(entry, coordinator),
-        ExoPoolAuthenticationStatusBinarySensor(entry, coordinator),
-        ExoPoolConnectedBinarySensor(entry, coordinator),
+        FilterPumpBinarySensor(entry, coordinator),
+        ErrorStateBinarySensor(entry, coordinator),
+        SaltWaterChlorinatorBinarySensor(entry, coordinator),
+        AuthenticationStatusBinarySensor(entry, coordinator),
+        ConnectedBinarySensor(entry, coordinator),
     ]
     async_add_entities(entities)
 
 
 # Binary Sensor Classes
-class ExoPoolFilterPumpBinarySensor(CoordinatorEntity, BinarySensorEntity):
-    """Representation of an Exo Pool filter pump binary sensor."""
+class FilterPumpBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """Representation of a filter pump binary sensor."""
 
     _attr_device_class = BinarySensorDeviceClass.RUNNING
     _attr_icon = "mdi:pump"
 
-    def __init__(self, entry: ConfigEntry, coordinator):
+    def __init__(self, entry: ConfigEntry, coordinator: DataUpdateCoordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Pool Filter Pump"
+        self._attr_name = "Filter Pump"
         self._attr_unique_id = f"{entry.entry_id}_filter_pump"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Exo Pool",
-            "manufacturer": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
         }
 
     @property
@@ -69,21 +74,23 @@ class ExoPoolFilterPumpBinarySensor(CoordinatorEntity, BinarySensorEntity):
         return self.coordinator.data is not None
 
 
-class ExoPoolErrorStateBinarySensor(CoordinatorEntity, BinarySensorEntity):
-    """Representation of an Exo Pool error state binary sensor."""
+class ErrorStateBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """Representation of an error state binary sensor."""
 
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
     _attr_icon = "mdi:alert"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
-    def __init__(self, entry: ConfigEntry, coordinator):
+    def __init__(self, entry: ConfigEntry, coordinator: DataUpdateCoordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Pool Error State"
+        self._attr_name = "Error State"
         self._attr_unique_id = f"{entry.entry_id}_error_state"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Exo Pool",
-            "manufacturer": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
         }
 
     @property
@@ -115,21 +122,22 @@ class ExoPoolErrorStateBinarySensor(CoordinatorEntity, BinarySensorEntity):
         return self.coordinator.data is not None
 
 
-class ExoPoolSaltWaterChlorinatorBinarySensor(CoordinatorEntity, BinarySensorEntity):
-    """Representation of an Exo Pool salt water chlorinator binary sensor."""
+class SaltWaterChlorinatorBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """Representation of a salt water chlorinator binary sensor."""
 
     _attr_device_class = BinarySensorDeviceClass.RUNNING
     _attr_icon = "mdi:water-plus"
 
-    def __init__(self, entry: ConfigEntry, coordinator):
+    def __init__(self, entry: ConfigEntry, coordinator: DataUpdateCoordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Pool Salt Water Chlorinator"
+        self._attr_name = "Salt Water Chlorinator"
         self._attr_unique_id = f"{entry.entry_id}_salt_water_chlorinator"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Exo Pool",
-            "manufacturer": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
         }
 
     @property
@@ -146,21 +154,23 @@ class ExoPoolSaltWaterChlorinatorBinarySensor(CoordinatorEntity, BinarySensorEnt
         return self.coordinator.data is not None
 
 
-class ExoPoolAuthenticationStatusBinarySensor(CoordinatorEntity, BinarySensorEntity):
-    """Representation of an Exo Pool authentication status binary sensor."""
+class AuthenticationStatusBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """Representation of an authentication status binary sensor."""
 
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_icon = "mdi:lock-check"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
-    def __init__(self, entry: ConfigEntry, coordinator):
+    def __init__(self, entry: ConfigEntry, coordinator: DataUpdateCoordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Exo Authentication Status"
+        self._attr_name = "Authentication Status"
         self._attr_unique_id = f"{entry.entry_id}_authentication_status"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Exo Pool",
-            "manufacturer": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
         }
 
     @property
@@ -179,21 +189,23 @@ class ExoPoolAuthenticationStatusBinarySensor(CoordinatorEntity, BinarySensorEnt
         return self.coordinator.data is not None
 
 
-class ExoPoolConnectedBinarySensor(CoordinatorEntity, BinarySensorEntity):
-    """Representation of an Exo Pool connected binary sensor."""
+class ConnectedBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """Representation of a connected binary sensor."""
 
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_icon = "mdi:signal"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
-    def __init__(self, entry: ConfigEntry, coordinator):
+    def __init__(self, entry: ConfigEntry, coordinator: DataUpdateCoordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Exo Connected"
+        self._attr_name = "Connected"
         self._attr_unique_id = f"{entry.entry_id}_connected"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Exo Pool",
-            "manufacturer": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
         }
 
     @property
@@ -203,4 +215,8 @@ class ExoPoolConnectedBinarySensor(CoordinatorEntity, BinarySensorEntity):
     @property
     def available(self):
         """Return availability based on data fetch success."""
+        _LOGGER.debug(
+            "Connected sensor availability check: coordinator.data=%s",
+            self.coordinator.data is not None,
+        )
         return self.coordinator.data is not None

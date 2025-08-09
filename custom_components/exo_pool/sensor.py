@@ -8,6 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .api import get_coordinator, ERROR_CODES, DOMAIN
+from homeassistant.const import EntityCategory
 import logging
 
 _LOGGER = logging.getLogger(__name__)
@@ -22,20 +23,21 @@ async def async_setup_entry(
 
     # Add sensors
     entities = [
-        ExoPoolTempSensor(entry, coordinator),
-        ExoPoolORPSensor(entry, coordinator),
-        ExoPoolORPBoostTimeSensor(entry, coordinator),
-        ExoPoolPHSensor(entry, coordinator),
-        ExoPoolPumpRPMSensor(entry, coordinator),
-        ExoPoolErrorCodeSensor(entry, coordinator),
-        ExoPoolFirmwareSensor(entry, coordinator),
+        TempSensor(entry, coordinator),
+        ORPSensor(entry, coordinator),
+        ORPBoostTimeSensor(entry, coordinator),
+        PHSensor(entry, coordinator),
+        PumpRPMSensor(entry, coordinator),
+        ErrorCodeSensor(entry, coordinator),
+        WifiRssiSensor(entry, coordinator),
+        HardwareSensor(entry, coordinator),
     ]
     async_add_entities(entities)
 
 
 # Sensor Classes
-class ExoPoolTempSensor(CoordinatorEntity, SensorEntity):
-    """Representation of an Exo Pool temperature sensor."""
+class TempSensor(CoordinatorEntity, SensorEntity):
+    """Representation of a temperature sensor."""
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -44,13 +46,14 @@ class ExoPoolTempSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, entry: ConfigEntry, coordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Exo Pool Temperature"
+        self._attr_name = "Temperature"
         self._attr_unique_id = f"{entry.entry_id}_temp"
         self._attr_native_unit_of_measurement = "°C"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Exo Pool",
-            "manufacturer": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
         }
 
     @property
@@ -63,8 +66,8 @@ class ExoPoolTempSensor(CoordinatorEntity, SensorEntity):
         )
 
 
-class ExoPoolORPSensor(CoordinatorEntity, SensorEntity):
-    """Representation of an Exo Pool ORP sensor."""
+class ORPSensor(CoordinatorEntity, SensorEntity):
+    """Representation of an ORP sensor."""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:water-check"
@@ -72,12 +75,13 @@ class ExoPoolORPSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, entry: ConfigEntry, coordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Exo Pool ORP"
+        self._attr_name = "ORP"
         self._attr_unique_id = f"{entry.entry_id}_orp"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Exo Pool",
-            "manufacturer": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
         }
 
     @property
@@ -90,8 +94,8 @@ class ExoPoolORPSensor(CoordinatorEntity, SensorEntity):
         )
 
 
-class ExoPoolORPBoostTimeSensor(CoordinatorEntity, SensorEntity):
-    """Representation of an Exo Pool ORP boost time sensor."""
+class ORPBoostTimeSensor(CoordinatorEntity, SensorEntity):
+    """Representation of an ORP boost time sensor."""
 
     _attr_icon = "mdi:timer-sand"
     _attr_native_unit_of_measurement = "min"
@@ -100,12 +104,13 @@ class ExoPoolORPBoostTimeSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, entry: ConfigEntry, coordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Exo Pool ORP Boost Time Remaining"
+        self._attr_name = "ORP Boost Time Remaining"
         self._attr_unique_id = f"{entry.entry_id}_orp_boost_time"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Exo Pool",
-            "manufacturer": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
         }
 
     @property
@@ -126,8 +131,8 @@ class ExoPoolORPBoostTimeSensor(CoordinatorEntity, SensorEntity):
         return None
 
 
-class ExoPoolPHSensor(CoordinatorEntity, SensorEntity):
-    """Representation of an Exo Pool pH sensor."""
+class PHSensor(CoordinatorEntity, SensorEntity):
+    """Representation of a pH sensor."""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:test-tube"
@@ -135,12 +140,13 @@ class ExoPoolPHSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, entry: ConfigEntry, coordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Exo Pool pH"
+        self._attr_name = "pH"
         self._attr_unique_id = f"{entry.entry_id}_ph"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Exo Pool",
-            "manufacturer": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
         }
 
     @property
@@ -154,8 +160,8 @@ class ExoPoolPHSensor(CoordinatorEntity, SensorEntity):
         return value / 10 if value is not None else None
 
 
-class ExoPoolPumpRPMSensor(CoordinatorEntity, SensorEntity):
-    """Representation of an Exo Pool pump RPM sensor."""
+class PumpRPMSensor(CoordinatorEntity, SensorEntity):
+    """Representation of a pump RPM sensor."""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "RPM"
@@ -164,12 +170,13 @@ class ExoPoolPumpRPMSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, entry: ConfigEntry, coordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Pool Pump RPM"
+        self._attr_name = "Pump RPM"
         self._attr_unique_id = f"{entry.entry_id}_pump_rpm"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Exo Pool",
-            "manufacturer": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
         }
 
     @property
@@ -188,20 +195,22 @@ class ExoPoolPumpRPMSensor(CoordinatorEntity, SensorEntity):
         return 0  # Default to 0 if no active VSP schedule found
 
 
-class ExoPoolErrorCodeSensor(CoordinatorEntity, SensorEntity):
-    """Representation of an Exo Pool error code sensor."""
+class ErrorCodeSensor(CoordinatorEntity, SensorEntity):
+    """Representation of an error code sensor."""
 
     _attr_icon = "mdi:alert-circle"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, entry: ConfigEntry, coordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Pool Error Code"
+        self._attr_name = "Error Code"
         self._attr_unique_id = f"{entry.entry_id}_error_code"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Exo Pool",
-            "manufacturer": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
         }
 
     @property
@@ -227,22 +236,90 @@ class ExoPoolErrorCodeSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class ExoPoolFirmwareSensor(CoordinatorEntity, SensorEntity):
-    """Representation of an Exo Pool firmware sensor."""
+class WifiRssiSensor(CoordinatorEntity, SensorEntity):
+    """Representation of a WiFi RSSI sensor."""
 
-    _attr_icon = "mdi:chip"
+    _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "dBm"
+    _attr_icon = "mdi:wifi"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, entry: ConfigEntry, coordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Pool Firmware"
-        self._attr_unique_id = f"{entry.entry_id}_firmware"
+        self._attr_name = "WiFi RSSI"
+        self._attr_unique_id = f"{entry.entry_id}_wifi_rssi"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Exo Pool",
-            "manufacturer": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
         }
 
     @property
     def native_value(self):
-        return self.coordinator.data.get("debug", {}).get("Version Firmware")
+        """Return the WiFi RSSI value."""
+        return self.coordinator.data.get("debug", {}).get("RSSI")
+
+
+class HardwareSensor(CoordinatorEntity, SensorEntity):
+    """Representation of hardware configuration information."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:information-outline"
+
+    def __init__(self, entry: ConfigEntry, coordinator):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_name = "Hardware"
+        self._attr_unique_id = f"{entry.entry_id}_hardware"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
+        }
+
+    @property
+    def native_value(self):
+        """Return a summary of enabled hardware capabilities."""
+        capabilities = []
+        if (
+            self.coordinator.data.get("equipment", {})
+            .get("swc_0", {})
+            .get("ph_only", 0)
+            == 1
+        ):
+            capabilities.append("PH")
+        if (
+            self.coordinator.data.get("equipment", {})
+            .get("swc_0", {})
+            .get("dual_link", 0)
+            == 1
+        ):
+            capabilities.append("ORP")
+        if (
+            self.coordinator.data.get("equipment", {}).get("swc_0", {}).get("vsp", 0)
+            == 1
+        ):
+            capabilities.append("VSP")
+        return ", ".join(capabilities) if capabilities else "None"
+
+    @property
+    def extra_state_attributes(self):
+        """Provide detailed hardware capability flags."""
+        return {
+            "variable_speed_pump": self.coordinator.data.get("equipment", {})
+            .get("swc_0", {})
+            .get("vsp", 0)
+            == 1,
+            "ph_control": self.coordinator.data.get("equipment", {})
+            .get("swc_0", {})
+            .get("ph_only", 0)
+            == 1,
+            "orp_control": self.coordinator.data.get("equipment", {})
+            .get("swc_0", {})
+            .get("dual_link", 0)
+            == 1,
+        }
