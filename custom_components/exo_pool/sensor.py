@@ -25,11 +25,9 @@ async def async_setup_entry(
     entities = [
         TempSensor(entry, coordinator),
         ORPSensor(entry, coordinator),
-        ORPBoostTimeSensor(entry, coordinator),
         PHSensor(entry, coordinator),
-        PumpRPMSensor(entry, coordinator),
         ErrorCodeSensor(entry, coordinator),
-        ErrorCodeTextSensor(entry, coordinator),  # New sensor
+        ErrorCodeTextSensor(entry, coordinator),
         WifiRssiSensor(entry, coordinator),
         HardwareSensor(entry, coordinator),
     ]
@@ -94,42 +92,14 @@ class ORPSensor(CoordinatorEntity, SensorEntity):
             .get("value")
         )
 
-
-class ORPBoostTimeSensor(CoordinatorEntity, SensorEntity):
-    """Representation of an ORP boost time sensor."""
-
-    _attr_icon = "mdi:timer-sand"
-    _attr_native_unit_of_measurement = "min"
-    _attr_state_class = SensorStateClass.MEASUREMENT
-
-    def __init__(self, entry: ConfigEntry, coordinator):
-        super().__init__(coordinator)
-        self._entry = entry
-        self._attr_name = "ORP Boost Time Remaining"
-        self._attr_unique_id = f"{entry.entry_id}_orp_boost_time"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": "Exo Pool",
-            "manufacturer": "Zodiac",
-            "model": "Exo",
-        }
-
     @property
-    def native_value(self):
-        """Convert HH:MM boost_time to total minutes."""
-        time_str = (
-            self.coordinator.data.get("equipment", {})
+    def extra_state_attributes(self):
+        """Provide additional ORP attributes."""
+        return {
+            "set_point": self.coordinator.data.get("equipment", {})
             .get("swc_0", {})
-            .get("boost_time")
-        )
-        if time_str and isinstance(time_str, str) and ":" in time_str:
-            try:
-                hours, minutes = map(int, time_str.split(":"))
-                return hours * 60 + minutes
-            except (ValueError, TypeError):
-                _LOGGER.error("Invalid boost_time format: %s", time_str)
-                return None
-        return None
+            .get("orp_sp")
+        }
 
 
 class PHSensor(CoordinatorEntity, SensorEntity):
@@ -160,40 +130,15 @@ class PHSensor(CoordinatorEntity, SensorEntity):
         )
         return value / 10 if value is not None else None
 
-
-class PumpRPMSensor(CoordinatorEntity, SensorEntity):
-    """Representation of a pump RPM sensor."""
-
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = "RPM"
-    _attr_icon = "mdi:fan"
-
-    def __init__(self, entry: ConfigEntry, coordinator):
-        super().__init__(coordinator)
-        self._entry = entry
-        self._attr_name = "Pump RPM"
-        self._attr_unique_id = f"{entry.entry_id}_pump_rpm"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": "Exo Pool",
-            "manufacturer": "Zodiac",
-            "model": "Exo",
-        }
-
     @property
-    def native_value(self):
-        # Implement pool_get_schedule_info logic
-        schedules = self.coordinator.data.get("schedules", {})
-        for key, value in schedules.items():
-            if (
-                isinstance(value, dict)
-                and value.get("endpoint")
-                and "vsp" in value.get("endpoint")
-                and value.get("enabled") == 1
-                and value.get("active") == 1
-            ):
-                return value.get("rpm")
-        return 0  # Default to 0 if no active VSP schedule found
+    def extra_state_attributes(self):
+        """Provide additional pH attributes."""
+        return {
+            "set_point": self.coordinator.data.get("equipment", {})
+            .get("swc_0", {})
+            .get("ph_sp")
+            / 10  # Convert to pH scale (e.g., 72 → 7.2)
+        }
 
 
 class ErrorCodeSensor(CoordinatorEntity, SensorEntity):

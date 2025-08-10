@@ -69,6 +69,21 @@ class FilterPumpBinarySensor(CoordinatorEntity, BinarySensorEntity):
         )
 
     @property
+    def extra_state_attributes(self):
+        """Provide additional filter pump attributes."""
+        schedules = self.coordinator.data.get("schedules", {})
+        for key, value in schedules.items():
+            if (
+                isinstance(value, dict)
+                and value.get("endpoint")
+                and "vsp" in value.get("endpoint")
+                and value.get("enabled") == 1
+                and value.get("active") == 1
+            ):
+                return {"speed_rpm": value.get("rpm")}
+        return {"speed_rpm": 0}  # Default to 0 if no active VSP schedule
+
+    @property
     def available(self):
         """Return availability based on data fetch success."""
         return self.coordinator.data is not None

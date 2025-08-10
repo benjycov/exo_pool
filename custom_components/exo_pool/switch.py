@@ -31,8 +31,8 @@ async def async_setup_entry(
     # Add switch entities
     entities = [
         ORPBoostSwitch(entry, coordinator),
-        PowerSwitch(entry, coordinator),  # Renamed from PowerStateSwitch
-        ChlorinatorSwitch(entry, coordinator),  # Renamed from ProductionSwitch
+        PowerSwitch(entry, coordinator),
+        ChlorinatorSwitch(entry, coordinator),
         Aux1Switch(entry, coordinator),
         Aux2Switch(entry, coordinator),
         SWCLowSwitch(entry, coordinator),
@@ -73,6 +73,23 @@ class ORPBoostSwitch(CoordinatorEntity, SwitchEntity):
             and "swc_0" in self.coordinator.data["equipment"]
         )
 
+    @property
+    def extra_state_attributes(self):
+        """Provide additional ORP boost time attributes."""
+        time_str = (
+            self.coordinator.data.get("equipment", {})
+            .get("swc_0", {})
+            .get("boost_time")
+        )
+        if time_str and isinstance(time_str, str) and ":" in time_str:
+            try:
+                hours, minutes = map(int, time_str.split(":"))
+                return {"boost_time_remaining": hours * 60 + minutes}
+            except (ValueError, TypeError):
+                _LOGGER.error("Invalid boost_time format: %s", time_str)
+                return {}
+        return {}
+
     async def async_turn_on(self):
         """Turn on the ORP Boost."""
         await set_pool_value(self.hass, self._entry, "boost", 1, delay_refresh=True)
@@ -86,7 +103,7 @@ class ORPBoostSwitch(CoordinatorEntity, SwitchEntity):
         self.async_write_ha_state()
 
 
-class PowerSwitch(CoordinatorEntity, SwitchEntity):  # Renamed from PowerStateSwitch
+class PowerSwitch(CoordinatorEntity, SwitchEntity):
     """Representation of a Power switch."""
 
     _attr_icon = "mdi:power"
@@ -94,7 +111,7 @@ class PowerSwitch(CoordinatorEntity, SwitchEntity):  # Renamed from PowerStateSw
     def __init__(self, entry: ConfigEntry, coordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Power"  # Changed from "Power State"
+        self._attr_name = "Power"
         self._attr_unique_id = f"{entry.entry_id}_exo_state"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
@@ -132,9 +149,7 @@ class PowerSwitch(CoordinatorEntity, SwitchEntity):  # Renamed from PowerStateSw
         self.async_write_ha_state()
 
 
-class ChlorinatorSwitch(
-    CoordinatorEntity, SwitchEntity
-):  # Renamed from ProductionSwitch
+class ChlorinatorSwitch(CoordinatorEntity, SwitchEntity):
     """Representation of a Chlorinator switch."""
 
     _attr_icon = "mdi:water-plus"
@@ -142,7 +157,7 @@ class ChlorinatorSwitch(
     def __init__(self, entry: ConfigEntry, coordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Chlorinator"  # Changed from "Production"
+        self._attr_name = "Chlorinator"
         self._attr_unique_id = f"{entry.entry_id}_production"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
