@@ -3,10 +3,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from datetime import timedelta
 import aiohttp
-import asyncio
 import async_timeout
 import logging
 import time
+import asyncio
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,6 +69,7 @@ async def async_update_data(hass: HomeAssistant, entry: ConfigEntry):
                 await _full_login(hass, entry, session)
 
             id_token = entry.data.get("id_token")  # Update after refresh/login
+            _LOGGER.debug("Authentication token refreshed: %s", id_token[:10] + "...")
 
         # Fetch device data
         headers = {
@@ -204,7 +205,7 @@ async def get_coordinator(hass: HomeAssistant, entry: ConfigEntry):
             _LOGGER,
             name="Exo Pool",
             update_method=lambda: async_update_data(hass, entry),
-            update_interval=timedelta(seconds=60),
+            update_interval=timedelta(seconds=15),  # Reduced from 60 to 15 seconds
         )
         hass.data[DOMAIN][entry.entry_id] = {"coordinator": coordinator}
         # Perform initial refresh

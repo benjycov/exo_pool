@@ -31,8 +31,8 @@ async def async_setup_entry(
     # Add switch entities
     entities = [
         ORPBoostSwitch(entry, coordinator),
-        PowerStateSwitch(entry, coordinator),
-        ProductionSwitch(entry, coordinator),
+        PowerSwitch(entry, coordinator),  # Renamed from PowerStateSwitch
+        ChlorinatorSwitch(entry, coordinator),  # Renamed from ProductionSwitch
         Aux1Switch(entry, coordinator),
         Aux2Switch(entry, coordinator),
         SWCLowSwitch(entry, coordinator),
@@ -86,15 +86,15 @@ class ORPBoostSwitch(CoordinatorEntity, SwitchEntity):
         self.async_write_ha_state()
 
 
-class PowerStateSwitch(CoordinatorEntity, SwitchEntity):
-    """Representation of a Power State switch."""
+class PowerSwitch(CoordinatorEntity, SwitchEntity):  # Renamed from PowerStateSwitch
+    """Representation of a Power switch."""
 
     _attr_icon = "mdi:power"
 
     def __init__(self, entry: ConfigEntry, coordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Power State"
+        self._attr_name = "Power"  # Changed from "Power State"
         self._attr_unique_id = f"{entry.entry_id}_exo_state"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
@@ -132,15 +132,17 @@ class PowerStateSwitch(CoordinatorEntity, SwitchEntity):
         self.async_write_ha_state()
 
 
-class ProductionSwitch(CoordinatorEntity, SwitchEntity):
-    """Representation of a Production switch."""
+class ChlorinatorSwitch(
+    CoordinatorEntity, SwitchEntity
+):  # Renamed from ProductionSwitch
+    """Representation of a Chlorinator switch."""
 
     _attr_icon = "mdi:water-plus"
 
     def __init__(self, entry: ConfigEntry, coordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Production"
+        self._attr_name = "Chlorinator"  # Changed from "Production"
         self._attr_unique_id = f"{entry.entry_id}_production"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
@@ -151,7 +153,7 @@ class ProductionSwitch(CoordinatorEntity, SwitchEntity):
 
     @property
     def is_on(self):
-        """Return the state of the Production."""
+        """Return the state of the Chlorinator."""
         return bool(
             self.coordinator.data.get("equipment", {})
             .get("swc_0", {})
@@ -168,7 +170,7 @@ class ProductionSwitch(CoordinatorEntity, SwitchEntity):
         )
 
     async def async_turn_on(self):
-        """Turn on the Production."""
+        """Turn on the Chlorinator."""
         await set_pool_value(
             self.hass, self._entry, "production", 1, delay_refresh=True
         )
@@ -176,7 +178,7 @@ class ProductionSwitch(CoordinatorEntity, SwitchEntity):
         self.async_write_ha_state()
 
     async def async_turn_off(self):
-        """Turn off the Production."""
+        """Turn off the Chlorinator."""
         await set_pool_value(
             self.hass, self._entry, "production", 0, delay_refresh=True
         )

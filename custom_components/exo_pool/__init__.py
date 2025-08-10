@@ -1,7 +1,6 @@
 from homeassistant.config_entries import ConfigEntry, ConfigEntryNotReady
 from homeassistant.core import HomeAssistant
 import logging
-import asyncio
 from .const import DOMAIN
 from .api import get_coordinator
 from homeassistant.helpers.device_registry import DeviceRegistry, async_get
@@ -31,23 +30,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         name="Exo Pool",
         model="Exo",
     )
-    await _update_device_info(
-        hass, entry, coordinator, device_registry, device_entry.id
-    )
 
-    # Store task reference to manage it
-    hass.data[DOMAIN][entry.entry_id] = {
-        "coordinator": coordinator,
-        "update_task": None,
-    }
+    # Add listener to update device info on coordinator refresh
+    def _update_on_refresh():
+        if coordinator.data is None:
+            _LOGGER.warning("Coordinator data is None, skipping device info update")
+            return
 
-    # Start the periodic update task
-    update_task = hass.async_create_task(
-        _async_start_periodic_updates(
-            hass, entry, coordinator, device_registry, device_entry.id
+        serial_number = coordinator.data.get("equipment", {}).get("swc_0", {}).get("sn")
+        sw_version = coordinator.data.get("debug", {}).get("Version Firmware")
+
+        device_registry.async_update_device(
+            device_entry.id,
+            sw_version=sw_version,
+            serial_number=serial_number,
         )
-    )
-    hass.data[DOMAIN][entry.entry_id]["update_task"] = update_task
+        _LOGGER.debug(
+            "Updated device info: serial_number=%s, sw_version=%s",
+            serial_number,
+            sw_version,
+        )
+
+    coordinator.async_add_listener(_update_on_refresh)
+
+    # Initial update
+    _update_on_refresh()
 
     # Forward setup to sensor, binary_sensor, switch, and number platforms
     try:
@@ -63,21 +70,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     try:
-        # Cancel the periodic update task if it exists
-        if (
-            entry.entry_id in hass.data.get(DOMAIN, {})
-            and "update_task" in hass.data[DOMAIN][entry.entry_id]
-        ):
-            task = hass.data[DOMAIN][entry.entry_id]["update_task"]
-            if task and not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    _LOGGER.debug(
-                        "Periodic update task cancelled for entry: %s", entry.entry_id
-                    )
-
         result = await hass.config_entries.async_unload_platforms(
             entry, ["sensor", "binary_sensor", "switch", "number"]
         )
@@ -88,44 +80,3 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except Exception as e:
         _LOGGER.error("Failed to unload platforms: %s", e)
         return False
-
-
-async def _update_device_info(
-    hass,
-    entry,
-    coordinator: DataUpdateCoordinator,
-    device_registry: DeviceRegistry,
-    device_id: str,
-):
-    """Update device info with capabilities and serial number."""
-    if coordinator.data is None:
-        _LOGGER.warning("Coordinator data is None, skipping device info update")
-        return
-
-    serial_number = coordinator.data.get("equipment", {}).get("swc_0", {}).get("sn")
-    sw_version = coordinator.data.get("debug", {}).get("Version Firmware")
-
-    device_registry.async_update_device(
-        device_id,
-        manufacturer="Zodiac",
-        sw_version=sw_version,
-        serial_number=serial_number,
-    )
-    _LOGGER.debug(
-        "Updated device info: serial_number=%s, sw_version=%s",
-        serial_number,
-        sw_version,
-    )
-
-
-async def _async_start_periodic_updates(
-    hass,
-    entry,
-    coordinator: DataUpdateCoordinator,
-    device_registry: DeviceRegistry,
-    device_id: str,
-):
-    """Start periodic updates for device info."""
-    while True:
-        await _update_device_info(hass, entry, coordinator, device_registry, device_id)
-        await asyncio.sleep(60)  # Update every minute
