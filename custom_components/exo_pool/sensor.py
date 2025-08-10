@@ -29,6 +29,7 @@ async def async_setup_entry(
         PHSensor(entry, coordinator),
         PumpRPMSensor(entry, coordinator),
         ErrorCodeSensor(entry, coordinator),
+        ErrorCodeTextSensor(entry, coordinator),  # New sensor
         WifiRssiSensor(entry, coordinator),
         HardwareSensor(entry, coordinator),
     ]
@@ -234,6 +235,35 @@ class ErrorCodeSensor(CoordinatorEntity, SensorEntity):
                 int(code) if code is not None else 0, "Unknown Error"
             )
         }
+
+
+class ErrorCodeTextSensor(CoordinatorEntity, SensorEntity):
+    """Representation of an error code text sensor."""
+
+    _attr_icon = "mdi:alert-circle-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, entry: ConfigEntry, coordinator):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_name = "Error Code Text"
+        self._attr_unique_id = f"{entry.entry_id}_error_code_text"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
+        }
+
+    @property
+    def native_value(self):
+        """Return the error message text."""
+        code = (
+            self.coordinator.data.get("equipment", {})
+            .get("swc_0", {})
+            .get("error_code")
+        )
+        return ERROR_CODES.get(int(code) if code is not None else 0, "No Error")
 
 
 class WifiRssiSensor(CoordinatorEntity, SensorEntity):

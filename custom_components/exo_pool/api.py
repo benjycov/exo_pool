@@ -19,7 +19,7 @@ API_KEY_R = "EOOEMOW4YR6QNB07"
 
 # Error code translation
 ERROR_CODES = {
-    0: "",
+    0: "No Error",
     3: "Low Conductivity",
     4: "Check Output",
     6: "Low Water Temp",
