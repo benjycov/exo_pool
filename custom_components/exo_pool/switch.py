@@ -9,15 +9,7 @@ import asyncio
 
 _LOGGER = logging.getLogger(__name__)
 
-try:
-    from .api import get_coordinator, set_pool_value, DOMAIN
-
-    _LOGGER.debug(
-        "Successfully imported get_coordinator, set_pool_value, DOMAIN from .api"
-    )
-except ImportError as e:
-    _LOGGER.error("Failed to import from .api: %s", e)
-    raise
+_LOGGER.debug("Switch platform module loaded")
 
 
 async def async_setup_entry(

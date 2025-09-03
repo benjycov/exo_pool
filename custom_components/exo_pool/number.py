@@ -4,7 +4,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .api import get_coordinator, set_pool_value, DOMAIN
-from homeassistant.helpers.entity_registry import async_get
 import logging
 
 _LOGGER = logging.getLogger(__name__)
@@ -18,44 +17,18 @@ async def async_setup_entry(
     # Retrieve shared coordinator
     coordinator = await get_coordinator(hass, entry)
 
-    # Add number entities
-    entities = [
-        ExoPoolORPSetPointNumber(entry, coordinator),
-        ExoPoolPHSetPointNumber(entry, coordinator),
-    ]
+    # Add only supported number entities based on capabilities
+    swc = coordinator.data.get("equipment", {}).get("swc_0", {}) if coordinator.data else {}
+    ph_capable = swc.get("ph_only", 0) == 1
+    orp_capable = swc.get("dual_link", 0) == 1
+
+    entities: list[NumberEntity] = []
+    if orp_capable:
+        entities.append(ExoPoolORPSetPointNumber(entry, coordinator))
+    if ph_capable:
+        entities.append(ExoPoolPHSetPointNumber(entry, coordinator))
+
     async_add_entities(entities)
-
-    # Disable entities based on device capabilities
-    entity_registry = async_get(hass)  # Synchronous call
-    await _disable_entities_based_on_capabilities(
-        hass, entry, entity_registry, coordinator
-    )
-
-
-async def _disable_entities_based_on_capabilities(
-    hass, entry, entity_registry, coordinator
-):
-    """Disable entities based on device capability attributes."""
-    ph_capable = (
-        coordinator.data.get("equipment", {}).get("swc_0", {}).get("ph_only", 0) == 1
-    )
-    orp_capable = (
-        coordinator.data.get("equipment", {}).get("swc_0", {}).get("dual_link", 0) == 1
-    )
-
-    entity_id_to_disable = {
-        "number.pool_ph_set_point": not ph_capable,
-        "number.pool_orp_set_point": not orp_capable,
-    }
-    for entity_id, disable in entity_id_to_disable.items():
-        if entity_id in entity_registry.entities:
-            entity_entry = entity_registry.async_get(entity_id)
-            if entity_entry and entity_entry.disabled_by is None and disable:
-                _LOGGER.debug("Disabling %s due to missing capability", entity_id)
-                entity_registry.async_update_entity(entity_id, disabled_by="user")
-            elif entity_entry and entity_entry.disabled_by == "user" and not disable:
-                _LOGGER.debug("Enabling %s as capability is now present", entity_id)
-                entity_registry.async_update_entity(entity_id, disabled_by=None)
 
 
 class ExoPoolORPSetPointNumber(CoordinatorEntity, NumberEntity):

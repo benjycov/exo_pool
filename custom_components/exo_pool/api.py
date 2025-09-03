@@ -1,6 +1,7 @@
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers import aiohttp_client
 from datetime import timedelta
 import aiohttp
 import async_timeout
@@ -44,55 +45,56 @@ async def async_update_data(hass: HomeAssistant, entry: ConfigEntry):
     id_token = entry.data.get("id_token")
     expires_at = entry.data.get("expires_at", 0)
 
-    async with aiohttp.ClientSession() as session:
-        # Refresh token if missing, expired, or about to expire
-        if (
-            not id_token
-            or _last_auth_error == '{"message":"The incoming token has expired"}'
-            or time.time() > expires_at
-        ):
-            _LOGGER.debug(
-                "Refreshing authentication tokens due to missing, expired, or upcoming expiration"
-            )
-            refreshed = False
-            if "refresh_token" in entry.data:
-                # Try refresh first
-                try:
-                    refreshed = await _refresh_token(hass, entry, session)
-                except Exception as e:
-                    _LOGGER.debug(
-                        "Token refresh failed: %s, falling back to full login", e
-                    )
+    # Reuse Home Assistant's shared aiohttp client session
+    session = aiohttp_client.async_get_clientsession(hass)
+    # Refresh token if missing, expired, or about to expire
+    if (
+        not id_token
+        or _last_auth_error == '{"message":"The incoming token has expired"}'
+        or time.time() > expires_at
+    ):
+        _LOGGER.debug(
+            "Refreshing authentication tokens due to missing, expired, or upcoming expiration"
+        )
+        refreshed = False
+        if "refresh_token" in entry.data:
+            # Try refresh first
+            try:
+                refreshed = await _refresh_token(hass, entry, session)
+            except Exception as e:
+                _LOGGER.debug(
+                    "Token refresh failed: %s, falling back to full login", e
+                )
 
-            if not refreshed:
-                # Full login
-                await _full_login(hass, entry, session)
+        if not refreshed:
+            # Full login
+            await _full_login(hass, entry, session)
 
-            id_token = entry.data.get("id_token")  # Update after refresh/login
-            _LOGGER.debug("Authentication token refreshed: %s", id_token[:10] + "...")
+        id_token = entry.data.get("id_token")  # Update after refresh/login
+        _LOGGER.debug("Authentication token refreshed: %s", id_token[:10] + "...")
 
-        # Fetch device data
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "okhttp/3.14.7",
-            "Authorization": f"Bearer {id_token}",
-        }
-        _LOGGER.debug("Fetching data for serial_number: %s", serial_number)
-        async with session.get(
-            DATA_URL_TEMPLATE.format(serial_number), headers=headers
-        ) as response:
-            _LOGGER.debug("Data fetch response status: %s", response.status)
-            if response.status != 200:
-                error_text = await response.text()
-                _LOGGER.error("Failed to fetch device data: %s", error_text)
-                if "The incoming token has expired" in error_text:
-                    _last_auth_error = (
-                        error_text  # Trigger re-authentication on next cycle
-                    )
-                raise Exception(f"Device data fetch failed: {error_text}")
-            data = await response.json()
-            _LOGGER.debug("Device data: %s", data)
-            return data.get("state", {}).get("reported", {})
+    # Fetch device data
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "okhttp/3.14.7",
+        "Authorization": f"Bearer {id_token}",
+    }
+    _LOGGER.debug("Fetching data for serial_number: %s", serial_number)
+    async with session.get(
+        DATA_URL_TEMPLATE.format(serial_number), headers=headers
+    ) as response:
+        _LOGGER.debug("Data fetch response status: %s", response.status)
+        if response.status != 200:
+            error_text = await response.text()
+            _LOGGER.error("Failed to fetch device data: %s", error_text)
+            if "The incoming token has expired" in error_text:
+                _last_auth_error = (
+                    error_text  # Trigger re-authentication on next cycle
+                )
+            raise Exception(f"Device data fetch failed: {error_text}")
+        data = await response.json()
+        _LOGGER.debug("Device data: %s", data)
+        return data.get("state", {}).get("reported", {})
 
 
 async def _full_login(
@@ -205,7 +207,8 @@ async def get_coordinator(hass: HomeAssistant, entry: ConfigEntry):
             _LOGGER,
             name="Exo Pool",
             update_method=lambda: async_update_data(hass, entry),
-            update_interval=timedelta(seconds=15),  # Reduced from 60 to 15 seconds
+            # Poll at a moderate interval to reduce cloud load
+            update_interval=timedelta(seconds=30),
         )
         hass.data[DOMAIN][entry.entry_id] = {"coordinator": coordinator}
         # Perform initial refresh
@@ -250,8 +253,8 @@ async def set_pool_value(hass, entry, setting, value, delay_refresh=False):
         payload,
         {k: v if k != "Authorization" else v[:10] + "..." for k, v in headers.items()},
     )
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload, headers=headers) as response:
+    session = aiohttp_client.async_get_clientsession(hass)
+    async with session.post(url, json=payload, headers=headers) as response:
             response_text = await response.text()
             _LOGGER.debug(
                 "Response status: %s, body: %s", response.status, response_text
@@ -273,3 +276,63 @@ async def set_pool_value(hass, entry, setting, value, delay_refresh=False):
                 else:
                     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
                     await coordinator.async_request_refresh()
+
+
+async def update_schedule(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    schedule_key: str,
+    *,
+    start: str | None = None,
+    end: str | None = None,
+    rpm: int | None = None,
+):
+    """Update a schedule's timer (and rpm for VSP) via the API."""
+    serial_number = entry.data["serial_number"]
+    id_token = entry.data.get("id_token")
+    if not id_token:
+        _LOGGER.error("No id_token available for schedule %s", schedule_key)
+        raise Exception("Unauthenticated")
+
+    sched_patch: dict = {}
+    if start is not None or end is not None:
+        timer: dict = {}
+        if start is not None:
+            timer["start"] = start
+        if end is not None:
+            timer["end"] = end
+        sched_patch["timer"] = timer
+    if rpm is not None:
+        try:
+            sched_patch["rpm"] = int(rpm)
+        except (TypeError, ValueError):
+            _LOGGER.warning("Invalid rpm value %s for schedule %s", rpm, schedule_key)
+
+    payload = {"state": {"desired": {"schedules": {schedule_key: sched_patch}}}}
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "User-Agent": "okhttp/3.14.7",
+        "Authorization": f"Bearer {id_token}",
+    }
+    url = DATA_URL_TEMPLATE.format(serial_number)
+    _LOGGER.debug(
+        "Updating schedule %s at %s with payload: %s",
+        schedule_key,
+        url,
+        payload,
+    )
+    session = aiohttp_client.async_get_clientsession(hass)
+    async with session.post(url, json=payload, headers=headers) as response:
+        response_text = await response.text()
+        _LOGGER.debug("Schedule update response: %s %s", response.status, response_text)
+        if response.status != 200:
+            _LOGGER.error(
+                "Failed to update schedule %s: %s (Status: %s)",
+                schedule_key,
+                response_text,
+                response.status,
+            )
+            raise Exception(f"Schedule update failed: {response_text}")
+    # Refresh to reflect updated schedule
+    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    await coordinator.async_request_refresh()
