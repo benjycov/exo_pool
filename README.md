@@ -2,6 +2,9 @@
 
 A custom integration to connect your Zodiac iAqualink Exo pool system to Home Assistant, providing control and monitoring of your pool's features.
 
+## Whats new:
+3/9/2025 - Added binary_sensors to represent each schedule, along with actions to change schedules!
+
 ## Installation via HACS
 
 1. Go to **HACS → Integrations → Custom Repositories**.
@@ -22,6 +25,7 @@ A custom integration to connect your Zodiac iAqualink Exo pool system to Home As
   - Pump RPM
   - Error Code
   - WiFi RSSI
+  - Schedules
 - **Switches**: Control pool components including:
   - ORP Boost
   - Power State
