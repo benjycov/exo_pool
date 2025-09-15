@@ -1,13 +1,13 @@
 {
   "domain": "exo_pool",
-  "version": "0.1.11",
   "name": "Exo Pool",
-  "documentation": "https://github.com/benjycov/exo_pool",
-  "issue_tracker": "https://github.com/benjycov/exo_pool/issues",
   "codeowners": [
     "@benjycov"
   ],
   "config_flow": true,
+  "documentation": "https://github.com/benjycov/exo_pool",
+  "integration_type": "hub",
   "iot_class": "cloud_polling",
-  "integration_type": "hub"
+  "issue_tracker": "https://github.com/benjycov/exo_pool/issues",
+  "version": "0.1.12"
 }
