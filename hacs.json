@@ -1,6 +1,6 @@
 {
   "name": "Exo Pool",
   "render_readme": true,
-  "domains": ["exo_pool"],
   "homeassistant": "2024.1.0"
 }
+

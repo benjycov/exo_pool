@@ -36,6 +36,9 @@ A custom integration to connect your Zodiac iAqualink Exo pool system to Home As
 - **Number Entities**: Adjust set points for:
   - pH Set Point
   - ORP Set Point
+- **Services**: New services to control schedule
+  - exo_pool.disable_schedule
+  - exo_pool.enable_schecule
 - **Diagnostic Information**: View hardware configuration (e.g., PH, ORP, VSP support) and status (e.g., Error State, Authentication Status, Connected) in the device info page.
 - **Dynamic Device Info**: Displays Serial Number and Software Version, updated periodically.
 
@@ -45,7 +48,6 @@ Classicly the core iAqualink interogration doesn't support Exo devices (european
 
 @martinfrench92 did make changes to the core integration, however these changes never made it to the main branch, and it was cumbersome for people to patch the changes in manually.
 I then created some really dirty Node Red flows which queried the API and did the basics (pH, Chlore, etc.). A couple of years later I migrated these to rest_commands with a bunch of related template sensors/switches, but what we really needed was a stand alone integration... so I knuckled down and with a little help from my AI minions smashed out this integration.
-
 
 ## Limitations
 
@@ -58,5 +60,10 @@ Should work with any Zodiac Exo pool system, confirmed to work with:
 
 - Exo IQ LS (with Dual-link ORP & PH, and Zodiac VSP pump)
 - ??? Let me know what you get it working with!
+
+## Support
+
+- Please use GitHub Issues ('https://github.com/benjycov/exo_pool/issues') for bugs/feature requests
+- GitHub Discussions ('https://github.com/benjycov/exo_pool/discussions') for Q&A
 
 
