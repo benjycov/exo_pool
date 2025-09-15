@@ -3,7 +3,9 @@
 A custom integration to connect your Zodiac iAqualink Exo pool system to Home Assistant, providing control and monitoring of your pool's features.
 
 ## Whats new:
+15/9/2025 - Added ability to modify API refresh rate, to deal with "Too Many Request" error.
 3/9/2025 - Added binary_sensors to represent each schedule, along with actions to change schedules!
+
 
 ## Installation via HACS
 
