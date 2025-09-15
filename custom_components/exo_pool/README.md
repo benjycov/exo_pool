@@ -20,6 +20,11 @@ A custom integration to connect your Zodiac iAqualink Exo pool system to Home As
 - Numbers: pH Set Point, ORP Set Point (when supported).
 - Dynamic Device Info: Serial Number and Software Version, updated periodically.
 - Diagnostics: Export redacted diagnostics from the device page.
+- Refresh: Configurable API refresh rate.
+
+## API Refresh Rate
+
+The API refresh rate is configurable (default 30s), if you set this figure to low you will see log errors, like 'Exception: Device data fetch failed: {"message":"Too Many Requests"}'. And there is a potential risk of being blocked. I'm currently experimenting with 60s.
 
 ## Schedule Sensors
 
