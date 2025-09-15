@@ -34,6 +34,11 @@ _last_auth_error = None
 
 # Domain constant
 DOMAIN = "exo_pool"
+# User-configurable refresh interval (seconds)
+REFRESH_OPTION_KEY = "refresh_interval"
+REFRESH_DEFAULT = 30
+REFRESH_MIN = 10
+REFRESH_MAX = 600
 
 
 async def async_update_data(hass: HomeAssistant, entry: ConfigEntry):
@@ -86,7 +91,39 @@ async def async_update_data(hass: HomeAssistant, entry: ConfigEntry):
         _LOGGER.debug("Data fetch response status: %s", response.status)
         if response.status != 200:
             error_text = await response.text()
-            _LOGGER.error("Failed to fetch device data: %s", error_text)
+            is_rate_limited = response.status == 429 or "Too Many Requests" in str(error_text)
+            if is_rate_limited:
+                _LOGGER.warning("Rate limited fetching device data: %s", error_text)
+            else:
+                _LOGGER.error("Failed to fetch device data: %s", error_text)
+            # Gracefully handle rate limiting: keep previous data and back off
+            if is_rate_limited:
+                coordinator = (
+                    hass.data.get(DOMAIN, {})
+                    .get(entry.entry_id, {})
+                    .get("coordinator")
+                )
+                if coordinator and coordinator.data is not None:
+                    try:
+                        current = getattr(coordinator, "update_interval", timedelta(seconds=REFRESH_DEFAULT))
+                        cur_s = int(current.total_seconds()) if current else REFRESH_DEFAULT
+                        # Exponential backoff up to REFRESH_MAX
+                        new_s = max(cur_s, min(cur_s * 2, REFRESH_MAX))
+                        if new_s != cur_s:
+                            coordinator.update_interval = timedelta(seconds=new_s)
+                            _LOGGER.warning(
+                                "429 Too Many Requests. Keeping previous data and backing off to %ss",
+                                new_s,
+                            )
+                        else:
+                            _LOGGER.warning(
+                                "429 Too Many Requests. Keeping previous data at %ss interval",
+                                cur_s,
+                            )
+                    except Exception as be:
+                        _LOGGER.debug("Backoff adjustment failed: %s", be)
+                    # Return previous data to avoid gaps
+                    return coordinator.data
             if "The incoming token has expired" in error_text:
                 _last_auth_error = (
                     error_text  # Trigger re-authentication on next cycle
@@ -202,13 +239,20 @@ async def get_coordinator(hass: HomeAssistant, entry: ConfigEntry):
     if DOMAIN not in hass.data:
         hass.data[DOMAIN] = {}
     if entry.entry_id not in hass.data[DOMAIN]:
+        # Initialize refresh interval from entry options (clamped)
+        seconds = entry.options.get(REFRESH_OPTION_KEY, REFRESH_DEFAULT)
+        try:
+            seconds = int(seconds)
+        except (TypeError, ValueError):
+            seconds = REFRESH_DEFAULT
+        seconds = max(REFRESH_MIN, min(REFRESH_MAX, seconds))
         coordinator = DataUpdateCoordinator(
             hass,
             _LOGGER,
             name="Exo Pool",
             update_method=lambda: async_update_data(hass, entry),
             # Poll at a moderate interval to reduce cloud load
-            update_interval=timedelta(seconds=30),
+            update_interval=timedelta(seconds=seconds),
         )
         hass.data[DOMAIN][entry.entry_id] = {"coordinator": coordinator}
         # Perform initial refresh
@@ -218,6 +262,28 @@ async def get_coordinator(hass: HomeAssistant, entry: ConfigEntry):
             _LOGGER.error("Initial data fetch failed: %s", e)
             raise
     return hass.data[DOMAIN][entry.entry_id]["coordinator"]
+
+
+async def async_set_refresh_interval(
+    hass: HomeAssistant, entry: ConfigEntry, seconds: int
+):
+    """Update the refresh interval for the coordinator and persist to options."""
+    try:
+        seconds = int(seconds)
+    except (TypeError, ValueError):
+        seconds = REFRESH_DEFAULT
+    seconds = max(REFRESH_MIN, min(REFRESH_MAX, seconds))
+
+    coordinator: DataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id][
+        "coordinator"
+    ]
+    coordinator.update_interval = timedelta(seconds=seconds)
+    _LOGGER.debug("Set refresh interval to %ss for %s", seconds, entry.entry_id)
+
+    # Persist to entry options
+    new_options = dict(entry.options)
+    new_options[REFRESH_OPTION_KEY] = seconds
+    hass.config_entries.async_update_entry(entry, options=new_options)
 
 
 async def set_pool_value(hass, entry, setting, value, delay_refresh=False):
