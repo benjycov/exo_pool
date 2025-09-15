@@ -123,4 +123,3 @@ Classicly the core iAqualink integration doesn't support Exo devices (European Z
 - Changing values (set points, Aux switch on/off, etc.) can be laggy; switches are optimistic with a ~10s refresh.
 - Schedule keys, names, and endpoints are determined by the device; enabling/disabling is modeled by times: 00:00–00:00 is treated as disabled.
 - RPM applies only to VSP schedules.
-

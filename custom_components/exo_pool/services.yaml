@@ -1,0 +1,53 @@
+set_schedule:
+  name: Set schedule
+  description: Create or update a schedule's time range and, if applicable, VSP RPM.
+  target:
+    entity:
+      domain: binary_sensor
+    device:
+      integration: exo_pool
+  fields:
+    schedule:
+      name: Schedule key
+      description: The schedule key (e.g., sch1, sch6, sch10). Optional if you target a schedule entity.
+      required: false
+      example: sch6
+      selector:
+        text:
+    start:
+      name: Start time
+      description: Start time in HH:MM (or HH:MM:SS). Leave empty to keep current value.
+      required: false
+      selector:
+        time:
+    end:
+      name: End time
+      description: End time in HH:MM (or HH:MM:SS). Leave empty to keep current value.
+      required: false
+      selector:
+        time:
+    rpm:
+      name: RPM (VSP only)
+      description: Optional VSP RPM. Ignored for non-VSP schedules.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 4000
+          step: 50
+
+disable_schedule:
+  name: Disable schedule
+  description: Disable a schedule by setting start and end to 00:00.
+  target:
+    entity:
+      domain: binary_sensor
+    device:
+      integration: exo_pool
+  fields:
+    schedule:
+      name: Schedule key
+      description: The schedule key (e.g., sch1, sch6, sch10). Optional if you target a schedule entity.
+      required: false
+      selector:
+        text:
