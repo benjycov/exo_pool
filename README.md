@@ -3,7 +3,7 @@
 A custom integration to connect your Zodiac iAqualink **Exo** pool system to Home Assistant, providing full control and monitoring of your pool’s features.
 
 ## 🆕 What’s New
-- **23 Sep 2025** - Added experimental climate entity for systems with the heat pump enabled.
+- **23 Sep 2025** - Added experimental climate entity for systems with the heat pump enabled, this is very much WIP, so please feedback!.
 - **15 Sep 2025** – Added option to adjust API refresh rate to avoid *“Too Many Requests”* errors.
 - **3 Sep 2025** – Added binary_sensors for each schedule plus actions to change schedules.
 
