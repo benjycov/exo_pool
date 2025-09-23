@@ -1,64 +1,49 @@
-# Exo Pool - Home Assistant Integration
+# Exo Pool – Home Assistant Integration
 
-A custom integration to connect your Zodiac iAqualink Exo pool system to Home Assistant, providing control and monitoring of your pool's features.
+A custom integration to connect your Zodiac iAqualink **Exo** pool system to Home Assistant, providing full control and monitoring of your pool’s features.
 
-## Installation via HACS
+## 🆕 What’s New
+- **23 Sep 2025** - Added experimental climate entity for systems with the heat pump enabled.
+- **15 Sep 2025** – Added option to adjust API refresh rate to avoid *“Too Many Requests”* errors.
+- **3 Sep 2025** – Added binary_sensors for each schedule plus actions to change schedules.
 
-1. Go to HACS → Integrations → Custom Repositories.
-2. Add `https://github.com/benjycov/exo_pool` as type `Integration`.
-3. Install Exo Pool from the list.
-4. Restart Home Assistant.
-5. Configure via the Integrations UI under Settings → Devices & Services → Add Integration.
+---
+
+## Installation (via HACS)
+
+1. In Home Assistant, go to **HACS → Integrations**.
+2. Search for **Exo Pool** and click **Install**.
+3. Restart Home Assistant.
+4. Go to **Settings → Devices & Services → Add Integration**, search for **Exo Pool**, and follow the prompts.
+
+---
 
 ## Features
 
-- Automatic Authentication: Secure login to the iAqualink API with email and password.
-- System Selection: Choose your Exo system from multiple pools/devices (filtered to device_type: "exo").
-- Sensors: Temperature, pH, ORP, Error Code (and text), WiFi RSSI, Hardware summary.
-- Binary Sensors: Filter Pump running, Chlorinator running, Error State, Authentication Status, Connected, one per schedule (see below).
-- Switches: ORP Boost, Power, Production, Aux 1, Aux 2, SWC Low.
-- Numbers: pH Set Point, ORP Set Point (when supported).
-- Dynamic Device Info: Serial Number and Software Version, updated periodically.
-- Diagnostics: Export redacted diagnostics from the device page.
-- Refresh: Configurable API refresh rate.
+- **Automatic Authentication** – Secure login to the iAqualink API using your email and password.
+- **System Selection** – Pick your Exo system from multiple pools/devices (filtered to `device_type: "exo"`).
+- **Sensors** – Temperature, pH, ORP, ORP Boost Time Remaining, Pump RPM, Error Code, Wi-Fi RSSI, Schedules.
+- **Binary Sensors** – Filter Pump running, Chlorinator running, Error State, Authentication Status, Connected, and one per schedule.
+- **Switches** – ORP Boost, Power State, Production, Aux 1, Aux 2, SWC Low.
+- **Numbers** – pH Set Point and ORP Set Point (when supported).
+- **Services** – Control and modify schedules (see below).
+- **Diagnostics & Dynamic Device Info** – View hardware configuration and live status; serial number and software version update periodically.
+- **Configurable Refresh Rate** – Default 30 s; increase if you see *Too Many Requests* errors (60 s recommended).
 
-## API Refresh Rate
+---
 
-The API refresh rate is configurable (default 30s), if you set this figure to low you will see log errors, like 'Exception: Device data fetch failed: {"message":"Too Many Requests"}'. And there is a potential risk of being blocked. I'm currently experimenting with 60s.
+## Schedule Services
 
-## Schedule Sensors
+Each Exo schedule is exposed as a binary sensor:
 
-Each schedule under the device is exposed as a binary sensor.
+- **State**: `on` when active.
+- **Attributes**: `schedule`, `enabled`, `start_time`, `end_time`, `type` (`vsp` | `swc` | `aux` | other), and `rpm` (VSP only).
+- **Icons**: VSP → pump/pump-off, SWC → water-plus/water-off, AUX → toggle, calendar fallback.
 
-- State: on when `active == 1`, otherwise off.
-- Attributes:
-  - `schedule`: schedule key (e.g., `sch6`)
-  - `enabled`: true/false
-  - `start_time`: HH:MM
-  - `end_time`: HH:MM
-  - `type`: `vsp` | `swc` | `aux` | other
-  - `rpm`: present for VSP schedules
-- Icons: VSP → pump/pump-off, SWC → water-plus/water-off, AUX → toggle icons, calendar fallback.
+### `exo_pool.set_schedule`
+Create or update a schedule’s time range and optional VSP RPM.
 
-## Services
-
-Two services are provided under the `exo_pool` domain.
-
-### exo_pool.set_schedule
-
-- Purpose: Create/update a schedule’s time range and optional VSP RPM.
-- Target: select either the schedule entity (recommended) or the Exo device.
-- Fields:
-  - `schedule` (optional if targeting a schedule entity): schedule key like `sch6`.
-  - `start` (optional): HH:MM (HH:MM:SS accepted; truncated).
-  - `end` (optional): HH:MM (HH:MM:SS accepted; truncated).
-  - `rpm` (optional): integer; only used for VSP schedules.
-
-Examples
-
-- Target schedule entity directly (Developer Tools → Services):
-
-```
+```yaml
 service: exo_pool.set_schedule
 target:
   entity_id: binary_sensor.schedule_filter_pump_2
@@ -68,58 +53,53 @@ data:
   rpm: 2000
 ```
 
-- Target device + schedule key:
+You can also target the device and specify `schedule: sch6` instead of the entity.
 
-```
-service: exo_pool.set_schedule
-target:
-  device_id: 1234567890abcdef1234567890abcdef
-data:
-  schedule: sch6
-  start: "08:00"
-  end: "11:00"
-```
+### `exo_pool.disable_schedule`
+Disable a schedule by setting start and end to `00:00`.
 
-### exo_pool.disable_schedule
-
-- Purpose: Disable a schedule by setting start and end to 00:00.
-- Target: schedule entity or Exo device.
-- Fields: `schedule` (optional if targeting a schedule entity).
-
-Examples
-
-```
+```yaml
 service: exo_pool.disable_schedule
 target:
   entity_id: binary_sensor.schedule_salt_water_chlorinator_2
 ```
 
-or
+---
 
-```
-service: exo_pool.disable_schedule
-target:
-  device_id: 1234567890abcdef1234567890abcdef
-data:
-  schedule: sch10
-```
+## Device Actions (Automations)
 
-## Device Actions (Automation UI)
+When creating an automation:
+**Device → your Exo Pool device → Actions**: *Set schedule* or *Disable schedule*.
+These map directly to the services above.
 
-Under Automations, choose Device → your Exo Pool device → select:
-
-- Set schedule: fields for `schedule`, optional `start`, `end`, `rpm`.
-- Disable schedule: field for `schedule`.
-
-These actions call the services above.
+---
 
 ## History
 
-Classicly the core iAqualink integration doesn't support Exo devices (European Zodiac-branded chlorinators). There has been a long thread on the topic here: https://github.com/flz/iaqualink-py/discussions/16. @martinfrench92 made changes to the core integration; however, they never made it to the main branch. After interim Node-RED and REST template approaches, this standalone integration was created.
+The core iAqualink integration never supported Exo devices (European Zodiac-branded chlorinators). See the long-running discussion: [flz/iaqualink-py#16](https://github.com/flz/iaqualink-py/discussions/16).
+After early Node-RED flows and REST template hacks, this dedicated integration was built to provide full native support.
+
+---
 
 ## Limitations
 
-- Deliberately restricted to Exo devices only; for other devices use the core iAqualink integration.
-- Changing values (set points, Aux switch on/off, etc.) can be laggy; switches are optimistic with a ~10s refresh.
-- Schedule keys, names, and endpoints are determined by the device; enabling/disabling is modeled by times: 00:00–00:00 is treated as disabled.
-- RPM applies only to VSP schedules.
+- Restricted to **Exo** devices only; use the core iAqualink integration for other hardware.
+- Commands (set points, Aux switches, etc.) can be slightly laggy; switches are optimistic with ~10 s refresh.
+- Schedule keys, names and endpoints are determined by the device; disabling a schedule is modelled as `00:00–00:00`.
+- RPM is only relevant to VSP schedules.
+
+---
+
+## Compatibility
+
+Confirmed working with:
+- **Exo IQ LS** (dual-link ORP & pH, Zodiac VSP pump).
+
+Have success with other models? Please share!
+
+---
+
+## Support
+
+- **Bugs / Feature Requests**: [GitHub Issues](https://github.com/benjycov/exo_pool/issues)
+- **Q&A / Discussion**: [GitHub Discussions](https://github.com/benjycov/exo_pool/discussions)

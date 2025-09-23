@@ -344,6 +344,47 @@ async def set_pool_value(hass, entry, setting, value, delay_refresh=False):
                     await coordinator.async_request_refresh()
 
 
+async def set_heating_value(hass, entry, key: str, value, delay_refresh: bool = False):
+    """Set a top-level heating value via the API (e.g., sp)."""
+    serial_number = entry.data["serial_number"]
+    id_token = entry.data.get("id_token")
+    if not id_token:
+        _LOGGER.error("No id_token available for heating.%s", key)
+        return
+
+    payload = {"state": {"desired": {"heating": {key: value}}}}
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "User-Agent": "okhttp/3.14.7",
+        "Authorization": f"Bearer {id_token}",
+    }
+    url = DATA_URL_TEMPLATE.format(serial_number)
+    _LOGGER.debug(
+        "Setting heating.%s to %s at %s with payload: %s",
+        key,
+        value,
+        url,
+        payload,
+    )
+    session = aiohttp_client.async_get_clientsession(hass)
+    async with session.post(url, json=payload, headers=headers) as response:
+        response_text = await response.text()
+        _LOGGER.debug("Heating set response status: %s, body: %s", response.status, response_text)
+        if response.status != 200:
+            _LOGGER.error(
+                "Failed to set heating.%s: %s (Status: %s)",
+                key,
+                response_text,
+                response.status,
+            )
+        else:
+            _LOGGER.debug("Successfully set heating.%s to %s", key, value)
+            coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+            if delay_refresh:
+                await asyncio.sleep(10)
+            await coordinator.async_request_refresh()
+
+
 async def update_schedule(
     hass: HomeAssistant,
     entry: ConfigEntry,

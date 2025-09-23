@@ -61,10 +61,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Initial update
     _update_on_refresh()
 
-    # Forward setup to sensor, binary_sensor, switch, and number platforms
+    # Forward setup to sensor, binary_sensor, switch, number, and climate platforms
     try:
         await hass.config_entries.async_forward_entry_setups(
-            entry, ["sensor", "binary_sensor", "switch", "number"]
+            entry, ["sensor", "binary_sensor", "switch", "number", "climate"]
         )
     except Exception as e:
         _LOGGER.error("Failed to set up platforms: %s", e)
@@ -82,7 +82,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     try:
         result = await hass.config_entries.async_unload_platforms(
-            entry, ["sensor", "binary_sensor", "switch", "number"]
+            entry, ["sensor", "binary_sensor", "switch", "number", "climate"]
         )
         if result and entry.entry_id in hass.data[DOMAIN]:
             del hass.data[DOMAIN][entry.entry_id]
