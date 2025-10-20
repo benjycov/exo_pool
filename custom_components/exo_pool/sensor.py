@@ -7,7 +7,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from .api import get_coordinator, ERROR_CODES, DOMAIN
+from .api import get_coordinator, ERROR_CODES
+from .const import DOMAIN, FILTER_PUMP_TYPE_MAP
 from homeassistant.const import EntityCategory
 import logging
 
@@ -260,41 +261,36 @@ class HardwareSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         """Return a summary of enabled hardware capabilities."""
         capabilities = []
-        if (
-            self.coordinator.data.get("equipment", {})
-            .get("swc_0", {})
-            .get("ph_only", 0)
-            == 1
-        ):
+        swc_data = self.coordinator.data.get("equipment", {}).get("swc_0", {})
+        if swc_data.get("ph_only", 0) == 1:
             capabilities.append("PH")
-        if (
-            self.coordinator.data.get("equipment", {})
-            .get("swc_0", {})
-            .get("dual_link", 0)
-            == 1
-        ):
+        if swc_data.get("dual_link", 0) == 1:
             capabilities.append("ORP")
-        if (
-            self.coordinator.data.get("equipment", {}).get("swc_0", {}).get("vsp", 0)
-            == 1
-        ):
-            capabilities.append("VSP")
+        pump_type_label = self._get_filter_pump_type_label()
+        if pump_type_label:
+            capabilities.append(pump_type_label)
         return ", ".join(capabilities) if capabilities else "None"
 
     @property
     def extra_state_attributes(self):
         """Provide detailed hardware capability flags."""
+        swc_data = self.coordinator.data.get("equipment", {}).get("swc_0", {})
+        pump_type_label = self._get_filter_pump_type_label()
         return {
-            "variable_speed_pump": self.coordinator.data.get("equipment", {})
-            .get("swc_0", {})
-            .get("vsp", 0)
-            == 1,
-            "ph_control": self.coordinator.data.get("equipment", {})
-            .get("swc_0", {})
-            .get("ph_only", 0)
-            == 1,
-            "orp_control": self.coordinator.data.get("equipment", {})
-            .get("swc_0", {})
-            .get("dual_link", 0)
-            == 1,
+            "filter_pump_type": pump_type_label,
+            "variable_speed_pump": pump_type_label == "VSP"
+            or (pump_type_label is None and swc_data.get("vsp", 0) == 1),
+            "ph_control": swc_data.get("ph_only", 0) == 1,
+            "orp_control": swc_data.get("dual_link", 0) == 1,
         }
+
+    def _get_filter_pump_type_label(self):
+        """Translate the filter pump type code into a label."""
+        swc_data = self.coordinator.data.get("equipment", {}).get("swc_0", {})
+        pump_type_value = swc_data.get("filter_pump", {}).get("type")
+        pump_type_label = FILTER_PUMP_TYPE_MAP.get(pump_type_value)
+        if pump_type_label:
+            return pump_type_label
+        if swc_data.get("vsp", 0) == 1:
+            return FILTER_PUMP_TYPE_MAP.get(2)
+        return None
