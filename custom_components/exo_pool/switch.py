@@ -320,7 +320,7 @@ class SWCLowSwitch(CoordinatorEntity, SwitchEntity):
     def is_on(self):
         """Return the state of SWC Low."""
         return bool(
-            self.coordinator.data.get("equipment", {}).get("swc_0", {}).get("swc_low")
+            self.coordinator.data.get("equipment", {}).get("swc_0", {}).get("low")
         )
 
     @property
@@ -334,12 +334,12 @@ class SWCLowSwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_on(self):
         """Turn on SWC Low."""
-        await set_pool_value(self.hass, self._entry, "swc_low", 1, delay_refresh=True)
+        await set_pool_value(self.hass, self._entry, "low", 1, delay_refresh=True)
         self._attr_is_on = True  # Optimistic update
         self.async_write_ha_state()
 
     async def async_turn_off(self):
         """Turn off SWC Low."""
-        await set_pool_value(self.hass, self._entry, "swc_low", 0, delay_refresh=True)
+        await set_pool_value(self.hass, self._entry, "low", 0, delay_refresh=True)
         self._attr_is_on = False  # Optimistic update
         self.async_write_ha_state()
