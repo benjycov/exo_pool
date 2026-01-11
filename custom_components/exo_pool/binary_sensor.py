@@ -17,6 +17,7 @@ from .api import (
     _last_auth_error,
     DOMAIN,
 )
+from .const import FILTER_PUMP_TYPE_MAP
 from homeassistant.const import EntityCategory
 
 _LOGGER = logging.getLogger(__name__)
@@ -107,22 +108,51 @@ class FilterPumpBinarySensor(CoordinatorEntity, BinarySensorEntity):
     @property
     def extra_state_attributes(self):
         """Provide additional filter pump attributes."""
-        schedules = self.coordinator.data.get("schedules", {})
-        for key, value in schedules.items():
-            if (
-                isinstance(value, dict)
-                and value.get("endpoint")
-                and "vsp" in value.get("endpoint")
-                and value.get("enabled") == 1
-                and value.get("active") == 1
-            ):
-                return {"speed_rpm": value.get("rpm")}
-        return {"speed_rpm": 0}  # Default to 0 if no active VSP schedule
+        swc_data = self.coordinator.data.get("equipment", {}).get("swc_0", {})
+        pump_type_label = self._get_filter_pump_type_label()
+        attributes = {}
+        if pump_type_label:
+            attributes["type"] = pump_type_label
+
+        include_speed = False
+        if pump_type_label == "VSP":
+            include_speed = True
+        elif pump_type_label is None and swc_data.get("vsp", 0) == 1:
+            include_speed = True
+
+        if include_speed:
+            schedules = self.coordinator.data.get("schedules", {})
+            rpm = 0
+            for value in schedules.values():
+                endpoint = value.get("endpoint") if isinstance(value, dict) else None
+                if (
+                    isinstance(value, dict)
+                    and isinstance(endpoint, str)
+                    and "vsp" in endpoint
+                    and value.get("enabled") == 1
+                    and value.get("active") == 1
+                ):
+                    rpm = value.get("rpm", rpm)
+                    break
+            attributes["speed_rpm"] = rpm
+
+        return attributes
 
     @property
     def available(self):
         """Return availability based on data fetch success."""
         return self.coordinator.data is not None
+
+    def _get_filter_pump_type_label(self):
+        """Translate filter pump type code into a label."""
+        swc_data = self.coordinator.data.get("equipment", {}).get("swc_0", {})
+        pump_type_value = swc_data.get("filter_pump", {}).get("type")
+        pump_type_label = FILTER_PUMP_TYPE_MAP.get(pump_type_value)
+        if pump_type_label:
+            return pump_type_label
+        if swc_data.get("vsp", 0) == 1:
+            return FILTER_PUMP_TYPE_MAP.get(2)
+        return None
 
 
 class ErrorStateBinarySensor(CoordinatorEntity, BinarySensorEntity):
