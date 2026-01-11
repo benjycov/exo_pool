@@ -1,12 +1,21 @@
 set_schedule:
   name: Set schedule
   description: Create or update a schedule's time range and, if applicable, VSP RPM.
-  target:
-    entity:
-      domain: binary_sensor
-    device:
-      integration: exo_pool
   fields:
+    entity_id:
+      name: Schedule entity
+      description: Target schedule entity to infer the schedule key. Optional if you select a device or schedule key.
+      required: false
+      selector:
+        entity:
+          domain: binary_sensor
+    device_id:
+      name: Device
+      description: Target Exo Pool device. Optional if you select a schedule entity.
+      required: false
+      selector:
+        device:
+          integration: exo_pool
     schedule:
       name: Schedule key
       description: The schedule key (e.g., sch1, sch6, sch10). Optional if you target a schedule entity.
@@ -39,10 +48,14 @@ set_schedule:
 reload:
   name: Reload
   description: Reload the Exo Pool integration. If you only have one entry, no data is required.
-  target:
-    device:
-      integration: exo_pool
   fields:
+    device_id:
+      name: Device
+      description: Target Exo Pool device to reload. Optional if you select a config entry.
+      required: false
+      selector:
+        device:
+          integration: exo_pool
     entry_id:
       name: Config entry
       description: Exo Pool config entry to reload. Optional if targeting a device.
@@ -54,12 +67,21 @@ reload:
 disable_schedule:
   name: Disable schedule
   description: Disable a schedule by setting start and end to 00:00.
-  target:
-    entity:
-      domain: binary_sensor
-    device:
-      integration: exo_pool
   fields:
+    entity_id:
+      name: Schedule entity
+      description: Target schedule entity to infer the schedule key. Optional if you select a device or schedule key.
+      required: false
+      selector:
+        entity:
+          domain: binary_sensor
+    device_id:
+      name: Device
+      description: Target Exo Pool device. Optional if you select a schedule entity.
+      required: false
+      selector:
+        device:
+          integration: exo_pool
     schedule:
       name: Schedule key
       description: The schedule key (e.g., sch1, sch6, sch10). Optional if you target a schedule entity.

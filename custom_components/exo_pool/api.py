@@ -1,6 +1,6 @@
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers import aiohttp_client
 from datetime import timedelta
 import aiohttp
@@ -93,47 +93,93 @@ async def async_update_data(hass: HomeAssistant, entry: ConfigEntry):
         _LOGGER.debug("Data fetch response status: %s", response.status)
         if response.status != 200:
             error_text = await response.text()
-            is_rate_limited = response.status == 429 or "Too Many Requests" in str(error_text)
+            is_rate_limited = response.status == 429 or "Too Many Requests" in str(
+                error_text
+            )
             if is_rate_limited:
                 _LOGGER.warning("Rate limited fetching device data: %s", error_text)
-            else:
-                _LOGGER.error("Failed to fetch device data: %s", error_text)
-            # Gracefully handle rate limiting: keep previous data and back off
-            if is_rate_limited:
                 coordinator = (
                     hass.data.get(DOMAIN, {})
                     .get(entry.entry_id, {})
                     .get("coordinator")
                 )
-                if coordinator and coordinator.data is not None:
+                if coordinator:
                     try:
-                        current = getattr(coordinator, "update_interval", timedelta(seconds=REFRESH_DEFAULT))
-                        cur_s = int(current.total_seconds()) if current else REFRESH_DEFAULT
-                        # Exponential backoff up to REFRESH_MAX
-                        new_s = max(cur_s, min(cur_s * 2, REFRESH_MAX))
-                        if new_s != cur_s:
-                            coordinator.update_interval = timedelta(seconds=new_s)
-                            _LOGGER.warning(
-                                "429 Too Many Requests. Keeping previous data and backing off to %ss",
-                                new_s,
-                            )
+                        configured = _get_configured_interval_seconds(entry)
+                        current = getattr(
+                            coordinator,
+                            "update_interval",
+                            timedelta(seconds=REFRESH_DEFAULT),
+                        )
+                        cur_s = (
+                            int(current.total_seconds())
+                            if current
+                            else REFRESH_DEFAULT
+                        )
+                        if coordinator.data:
+                            # Exponential backoff up to REFRESH_MAX
+                            new_s = max(cur_s, min(cur_s * 2, REFRESH_MAX))
+                            if new_s != cur_s:
+                                coordinator.update_interval = timedelta(seconds=new_s)
+                                _LOGGER.warning(
+                                    "429 Too Many Requests, backing off to %ss",
+                                    new_s,
+                                )
+                            else:
+                                _LOGGER.warning(
+                                    "429 Too Many Requests, keeping %ss interval",
+                                    cur_s,
+                                )
                         else:
-                            _LOGGER.warning(
-                                "429 Too Many Requests. Keeping previous data at %ss interval",
-                                cur_s,
-                            )
-                    except Exception as be:
-                        _LOGGER.debug("Backoff adjustment failed: %s", be)
-                    # Return previous data to avoid gaps
-                    return coordinator.data
+                            retry_s = max(60, min(configured, REFRESH_MAX))
+                            if retry_s != cur_s:
+                                coordinator.update_interval = timedelta(
+                                    seconds=retry_s
+                                )
+                                _LOGGER.warning(
+                                    "429 Too Many Requests, retrying in %ss",
+                                    retry_s,
+                                )
+                    except Exception as backoff_error:
+                        _LOGGER.debug(
+                            "Backoff adjustment failed: %s",
+                            backoff_error,
+                        )
+                    # Return previous data or empty data to avoid startup failure
+                    _LOGGER.debug(
+                        "Rate limited, returning cached data to keep coordinator loaded"
+                    )
+                    return coordinator.data or {}
+                return {}
+
+            _LOGGER.error("Failed to fetch device data: %s", error_text)
             if "The incoming token has expired" in error_text:
-                _last_auth_error = (
-                    error_text  # Trigger re-authentication on next cycle
-                )
-            raise Exception(f"Device data fetch failed: {error_text}")
+                _last_auth_error = error_text
+            raise UpdateFailed(f"Device data fetch failed: {error_text}")
         data = await response.json()
         _LOGGER.debug("Device data: %s", data)
-        return data.get("state", {}).get("reported", {})
+        reported = data.get("state", {}).get("reported", {})
+        coordinator = (
+            hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("coordinator")
+        )
+        if coordinator:
+            configured = _get_configured_interval_seconds(entry)
+            current = getattr(
+                coordinator,
+                "update_interval",
+                timedelta(seconds=REFRESH_DEFAULT),
+            )
+            if (
+                current
+                and int(current.total_seconds()) > configured
+                and "boost_task" not in _get_entry_store(hass, entry)
+            ):
+                coordinator.update_interval = timedelta(seconds=configured)
+                _LOGGER.debug(
+                    "Restored polling interval to %ss after successful fetch",
+                    configured,
+                )
+        return reported
 
 
 async def _full_login(

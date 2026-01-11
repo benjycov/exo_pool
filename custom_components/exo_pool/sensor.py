@@ -136,11 +136,13 @@ class PHSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         """Provide additional pH attributes."""
+        set_point = (
+            self.coordinator.data.get("equipment", {}).get("swc_0", {}).get("ph_sp")
+        )
         return {
-            "set_point": self.coordinator.data.get("equipment", {})
-            .get("swc_0", {})
-            .get("ph_sp")
-            / 10  # Convert to pH scale (e.g., 72 → 7.2)
+            "set_point": (
+                set_point / 10 if set_point is not None else None
+            ),  # Convert to pH scale (e.g., 72 -> 7.2)
         }
 
 
