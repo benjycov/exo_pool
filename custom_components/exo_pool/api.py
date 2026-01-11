@@ -36,9 +36,11 @@ _last_auth_error = None
 DOMAIN = "exo_pool"
 # User-configurable refresh interval (seconds)
 REFRESH_OPTION_KEY = "refresh_interval"
-REFRESH_DEFAULT = 30
-REFRESH_MIN = 10
-REFRESH_MAX = 600
+REFRESH_DEFAULT = 600
+REFRESH_MIN = 300
+REFRESH_MAX = 3600
+BOOST_INTERVAL = 10
+BOOST_DURATION = 60
 
 
 async def async_update_data(hass: HomeAssistant, entry: ConfigEntry):
@@ -234,18 +236,68 @@ async def _refresh_token(
         return True
 
 
-async def get_coordinator(hass: HomeAssistant, entry: ConfigEntry):
-    """Get or create a shared DataUpdateCoordinator for the config entry."""
+def _get_configured_interval_seconds(entry: ConfigEntry) -> int:
+    """Return the configured refresh interval in seconds, clamped to limits."""
+    seconds = entry.options.get(REFRESH_OPTION_KEY, REFRESH_DEFAULT)
+    try:
+        seconds = int(seconds)
+    except (TypeError, ValueError):
+        seconds = REFRESH_DEFAULT
+    return max(REFRESH_MIN, min(REFRESH_MAX, seconds))
+
+
+def _get_entry_store(hass: HomeAssistant, entry: ConfigEntry) -> dict:
+    """Return the data store for this config entry."""
     if DOMAIN not in hass.data:
         hass.data[DOMAIN] = {}
-    if entry.entry_id not in hass.data[DOMAIN]:
-        # Initialize refresh interval from entry options (clamped)
-        seconds = entry.options.get(REFRESH_OPTION_KEY, REFRESH_DEFAULT)
+    return hass.data[DOMAIN].setdefault(entry.entry_id, {})
+
+
+async def _async_boost_refresh_interval(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
+    """Temporarily increase polling frequency after a change."""
+    store = _get_entry_store(hass, entry)
+    coordinator: DataUpdateCoordinator | None = store.get("coordinator")
+    if coordinator is None:
+        return
+
+    current = coordinator.update_interval
+    current_seconds = int(current.total_seconds()) if current else REFRESH_DEFAULT
+    if current_seconds > BOOST_INTERVAL:
+        coordinator.update_interval = timedelta(seconds=BOOST_INTERVAL)
+        _LOGGER.debug(
+            "Temporarily increased polling to %ss for %s",
+            BOOST_INTERVAL,
+            entry.entry_id,
+        )
+
+    if task := store.get("boost_task"):
+        task.cancel()
+
+    async def _reset_interval() -> None:
         try:
-            seconds = int(seconds)
-        except (TypeError, ValueError):
-            seconds = REFRESH_DEFAULT
-        seconds = max(REFRESH_MIN, min(REFRESH_MAX, seconds))
+            await asyncio.sleep(BOOST_DURATION)
+        except asyncio.CancelledError:
+            return
+        configured = _get_configured_interval_seconds(entry)
+        coordinator.update_interval = timedelta(seconds=configured)
+        _LOGGER.debug(
+            "Restored polling interval to %ss for %s",
+            configured,
+            entry.entry_id,
+        )
+        store.pop("boost_task", None)
+
+    store["boost_task"] = hass.async_create_task(_reset_interval())
+
+
+async def get_coordinator(hass: HomeAssistant, entry: ConfigEntry):
+    """Get or create a shared DataUpdateCoordinator for the config entry."""
+    store = _get_entry_store(hass, entry)
+    if "coordinator" not in store:
+        # Initialize refresh interval from entry options (clamped)
+        seconds = _get_configured_interval_seconds(entry)
         coordinator = DataUpdateCoordinator(
             hass,
             _LOGGER,
@@ -254,14 +306,14 @@ async def get_coordinator(hass: HomeAssistant, entry: ConfigEntry):
             # Poll at a moderate interval to reduce cloud load
             update_interval=timedelta(seconds=seconds),
         )
-        hass.data[DOMAIN][entry.entry_id] = {"coordinator": coordinator}
+        store["coordinator"] = coordinator
         # Perform initial refresh
         try:
             await coordinator.async_config_entry_first_refresh()
         except Exception as e:
             _LOGGER.error("Initial data fetch failed: %s", e)
             raise
-    return hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    return store["coordinator"]
 
 
 async def async_set_refresh_interval(
@@ -274,10 +326,10 @@ async def async_set_refresh_interval(
         seconds = REFRESH_DEFAULT
     seconds = max(REFRESH_MIN, min(REFRESH_MAX, seconds))
 
-    coordinator: DataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id][
-        "coordinator"
-    ]
-    coordinator.update_interval = timedelta(seconds=seconds)
+    store = _get_entry_store(hass, entry)
+    coordinator: DataUpdateCoordinator = store["coordinator"]
+    if "boost_task" not in store:
+        coordinator.update_interval = timedelta(seconds=seconds)
     _LOGGER.debug("Set refresh interval to %ss for %s", seconds, entry.entry_id)
 
     # Persist to entry options
@@ -337,11 +389,9 @@ async def set_pool_value(hass, entry, setting, value, delay_refresh=False):
                 # Refresh coordinator with delay if requested
                 if delay_refresh:
                     await asyncio.sleep(10)  # Wait 10 seconds for Exo to update
-                    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-                    await coordinator.async_request_refresh()
-                else:
-                    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-                    await coordinator.async_request_refresh()
+                await _async_boost_refresh_interval(hass, entry)
+                coordinator = _get_entry_store(hass, entry)["coordinator"]
+                await coordinator.async_request_refresh()
 
 
 async def set_heating_value(hass, entry, key: str, value, delay_refresh: bool = False):
@@ -379,9 +429,10 @@ async def set_heating_value(hass, entry, key: str, value, delay_refresh: bool = 
             )
         else:
             _LOGGER.debug("Successfully set heating.%s to %s", key, value)
-            coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
             if delay_refresh:
                 await asyncio.sleep(10)
+            await _async_boost_refresh_interval(hass, entry)
+            coordinator = _get_entry_store(hass, entry)["coordinator"]
             await coordinator.async_request_refresh()
 
 
@@ -441,5 +492,6 @@ async def update_schedule(
             )
             raise Exception(f"Schedule update failed: {response_text}")
     # Refresh to reflect updated schedule
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    await _async_boost_refresh_interval(hass, entry)
+    coordinator = _get_entry_store(hass, entry)["coordinator"]
     await coordinator.async_request_refresh()

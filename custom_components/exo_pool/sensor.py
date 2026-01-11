@@ -7,8 +7,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from .api import get_coordinator, ERROR_CODES, DOMAIN
-from homeassistant.const import EntityCategory
+from .api import get_coordinator, ERROR_CODES
+from .const import DOMAIN, FILTER_PUMP_TYPE_MAP
+from homeassistant.const import EntityCategory, PERCENTAGE
 import logging
 
 _LOGGER = logging.getLogger(__name__)
@@ -26,6 +27,8 @@ async def async_setup_entry(
         TempSensor(entry, coordinator),
         ORPSensor(entry, coordinator),
         PHSensor(entry, coordinator),
+        SWCOutputSensor(entry, coordinator),
+        SWCLowOutputSensor(entry, coordinator),
         ErrorCodeSensor(entry, coordinator),
         ErrorCodeTextSensor(entry, coordinator),
         WifiRssiSensor(entry, coordinator),
@@ -139,6 +142,56 @@ class PHSensor(CoordinatorEntity, SensorEntity):
             .get("ph_sp")
             / 10  # Convert to pH scale (e.g., 72 → 7.2)
         }
+
+
+class SWCOutputSensor(CoordinatorEntity, SensorEntity):
+    """Representation of a SWC output sensor."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_icon = "mdi:water-percent"
+
+    def __init__(self, entry: ConfigEntry, coordinator):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_name = "SWC Output"
+        self._attr_unique_id = f"{entry.entry_id}_swc_output"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
+        }
+
+    @property
+    def native_value(self):
+        return self.coordinator.data.get("equipment", {}).get("swc_0", {}).get("swc")
+
+
+class SWCLowOutputSensor(CoordinatorEntity, SensorEntity):
+    """Representation of a SWC low output sensor."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_icon = "mdi:water-percent"
+
+    def __init__(self, entry: ConfigEntry, coordinator):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_name = "SWC Low Output"
+        self._attr_unique_id = f"{entry.entry_id}_swc_low_output"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
+        }
+
+    @property
+    def native_value(self):
+        return (
+            self.coordinator.data.get("equipment", {}).get("swc_0", {}).get("swc_low")
+        )
 
 
 class ErrorCodeSensor(CoordinatorEntity, SensorEntity):
@@ -260,41 +313,36 @@ class HardwareSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         """Return a summary of enabled hardware capabilities."""
         capabilities = []
-        if (
-            self.coordinator.data.get("equipment", {})
-            .get("swc_0", {})
-            .get("ph_only", 0)
-            == 1
-        ):
+        swc_data = self.coordinator.data.get("equipment", {}).get("swc_0", {})
+        if swc_data.get("ph_only", 0) == 1:
             capabilities.append("PH")
-        if (
-            self.coordinator.data.get("equipment", {})
-            .get("swc_0", {})
-            .get("dual_link", 0)
-            == 1
-        ):
+        if swc_data.get("dual_link", 0) == 1:
             capabilities.append("ORP")
-        if (
-            self.coordinator.data.get("equipment", {}).get("swc_0", {}).get("vsp", 0)
-            == 1
-        ):
-            capabilities.append("VSP")
+        pump_type_label = self._get_filter_pump_type_label()
+        if pump_type_label:
+            capabilities.append(pump_type_label)
         return ", ".join(capabilities) if capabilities else "None"
 
     @property
     def extra_state_attributes(self):
         """Provide detailed hardware capability flags."""
+        swc_data = self.coordinator.data.get("equipment", {}).get("swc_0", {})
+        pump_type_label = self._get_filter_pump_type_label()
         return {
-            "variable_speed_pump": self.coordinator.data.get("equipment", {})
-            .get("swc_0", {})
-            .get("vsp", 0)
-            == 1,
-            "ph_control": self.coordinator.data.get("equipment", {})
-            .get("swc_0", {})
-            .get("ph_only", 0)
-            == 1,
-            "orp_control": self.coordinator.data.get("equipment", {})
-            .get("swc_0", {})
-            .get("dual_link", 0)
-            == 1,
+            "filter_pump_type": pump_type_label,
+            "variable_speed_pump": pump_type_label == "VSP"
+            or (pump_type_label is None and swc_data.get("vsp", 0) == 1),
+            "ph_control": swc_data.get("ph_only", 0) == 1,
+            "orp_control": swc_data.get("dual_link", 0) == 1,
         }
+
+    def _get_filter_pump_type_label(self):
+        """Translate the filter pump type code into a label."""
+        swc_data = self.coordinator.data.get("equipment", {}).get("swc_0", {})
+        pump_type_value = swc_data.get("filter_pump", {}).get("type")
+        pump_type_label = FILTER_PUMP_TYPE_MAP.get(pump_type_value)
+        if pump_type_label:
+            return pump_type_label
+        if swc_data.get("vsp", 0) == 1:
+            return FILTER_PUMP_TYPE_MAP.get(2)
+        return None

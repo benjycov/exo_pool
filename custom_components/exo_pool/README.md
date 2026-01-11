@@ -3,6 +3,13 @@
 A custom integration to connect your Zodiac iAqualink **Exo** pool system to Home Assistant, providing full control and monitoring of your pool’s features.
 
 ## 🆕 What’s New
+- **11 Jan 2026**
+
+1) Changes to refresh rates, now by default we only refresh data from the API every 5 minutes (this will gracefully reduce if 429s are detected), but temporarily boost the rate to every 10s when a user change (for example PH set point) is made.
+2) SWC sensors were incorrect before. Now SWC normal and low levels are settable with the correct switch ('low' from shadow data) reflecting if low mode is enabled. In the future we will hide these levels for systems with an ORP sensor (like me), as the swc levels are all 0. For now though I have left it in for debugging purposes.
+3) Added a service exo_pool.reload - this will reload the integration if you determine for some reason it needs it (hopefully not with the new refresh timings).
+
+- **20 Oct 2025** - Modifications for SSP (Single Speed Pump) - single speed pumps should now be correctly recognised.
 - **23 Sep 2025** - Added experimental climate entity for systems with the heat pump enabled.
 - **15 Sep 2025** – Added option to adjust API refresh rate to avoid *“Too Many Requests”* errors.
 - **3 Sep 2025** – Added binary_sensors for each schedule plus actions to change schedules.
@@ -22,13 +29,14 @@ A custom integration to connect your Zodiac iAqualink **Exo** pool system to Hom
 
 - **Automatic Authentication** – Secure login to the iAqualink API using your email and password.
 - **System Selection** – Pick your Exo system from multiple pools/devices (filtered to `device_type: "exo"`).
-- **Sensors** – Temperature, pH, ORP, ORP Boost Time Remaining, Pump RPM, Error Code, Wi-Fi RSSI, Schedules.
+- **Sensors** – Temperature, pH, ORP, ORP Boost Time Remaining, Pump RPM, Error Code, Wi-Fi RSSI.
 - **Binary Sensors** – Filter Pump running, Chlorinator running, Error State, Authentication Status, Connected, and one per schedule.
 - **Switches** – ORP Boost, Power State, Production, Aux 1, Aux 2, SWC Low.
-- **Numbers** – pH Set Point and ORP Set Point (when supported).
+- **Numbers** – SWC Output, SWC Low Output, Refresh Interval, plus pH/ORP Set Points when supported.
+- **Climate (experimental)** – Heat Pump control when Aux 2 is configured for heat mode.
 - **Services** – Control and modify schedules (see below).
 - **Diagnostics & Dynamic Device Info** – View hardware configuration and live status; serial number and software version update periodically.
-- **Configurable Refresh Rate** – Default 30 s; increase if you see *Too Many Requests* errors (60 s recommended).
+- **Configurable Refresh Rate** – Adjust the `Refresh Interval` number (300–3600 s, default 600 s) if you see *Too Many Requests* errors.
 
 ---
 
@@ -84,9 +92,10 @@ After early Node-RED flows and REST template hacks, this dedicated integration w
 ## Limitations
 
 - Restricted to **Exo** devices only; use the core iAqualink integration for other hardware.
-- Commands (set points, Aux switches, etc.) can be slightly laggy; switches are optimistic with ~10 s refresh.
+- Commands (set points, Aux switches, etc.) can be slightly laggy; polling is temporarily boosted to ~10 s for ~60 s after changes.
 - Schedule keys, names and endpoints are determined by the device; disabling a schedule is modelled as `00:00–00:00`.
 - RPM is only relevant to VSP schedules.
+- The heat pump climate entity only appears when Aux 2 is set to heat mode.
 
 ---
 

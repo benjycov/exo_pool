@@ -1,4 +1,8 @@
-from homeassistant.config_entries import ConfigEntry, ConfigEntryNotReady
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigEntryNotReady,
+    ConfigEntryState,
+)
 from homeassistant.core import HomeAssistant, ServiceCall
 import logging
 from .const import DOMAIN
@@ -7,7 +11,7 @@ from . import api as exo_api
 from homeassistant.helpers.device_registry import DeviceRegistry, async_get
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 import voluptuous as vol
 import re
 
@@ -182,6 +186,29 @@ def _resolve_target(hass: HomeAssistant, call: ServiceCall) -> tuple[ConfigEntry
 
 
 def _register_services(hass: HomeAssistant) -> None:
+    async def handle_reload(call: ServiceCall) -> None:
+        entry_id = call.data.get("entry_id")
+        if entry_id:
+            entry = hass.config_entries.async_get_entry(entry_id)
+            if not entry:
+                raise ServiceValidationError("Config entry not found")
+        else:
+            device_id = call.data.get("device_id")
+            if device_id:
+                entry = _find_entry_from_device(hass, device_id)
+            else:
+                entries = hass.config_entries.async_entries(DOMAIN)
+                if len(entries) != 1:
+                    raise ServiceValidationError(
+                        "Select a device or config entry"
+                    )
+                entry = entries[0]
+
+        if entry.state is not ConfigEntryState.LOADED:
+            raise ServiceValidationError("Config entry is not loaded")
+
+        await hass.config_entries.async_reload(entry.entry_id)
+
     async def handle_set_schedule(call: ServiceCall) -> None:
         entry, schedule_key = _resolve_target(hass, call)
         start = _normalize_time(call.data.get("start"))
@@ -208,5 +235,6 @@ def _register_services(hass: HomeAssistant) -> None:
             raise HomeAssistantError("Missing schedule key; select a schedule entity or provide schedule")
         await exo_api.update_schedule(hass, entry, schedule_key, start="00:00", end="00:00", rpm=None)
 
+    hass.services.async_register(DOMAIN, "reload", handle_reload)
     hass.services.async_register(DOMAIN, "set_schedule", handle_set_schedule)
     hass.services.async_register(DOMAIN, "disable_schedule", handle_disable_schedule)

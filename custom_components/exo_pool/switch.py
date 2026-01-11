@@ -27,7 +27,7 @@ async def async_setup_entry(
         ChlorinatorSwitch(entry, coordinator),
         Aux1Switch(entry, coordinator),
         Aux2Switch(entry, coordinator),
-        SWCLowSwitch(entry, coordinator),
+        SWCLowModeSwitch(entry, coordinator),
     ]
     async_add_entities(entities)
 
@@ -299,16 +299,16 @@ class Aux2Switch(CoordinatorEntity, SwitchEntity):
         self.async_write_ha_state()
 
 
-class SWCLowSwitch(CoordinatorEntity, SwitchEntity):
-    """Representation of a SWC Low switch."""
+class SWCLowModeSwitch(CoordinatorEntity, SwitchEntity):
+    """Representation of a SWC low mode switch."""
 
     _attr_icon = "mdi:water-minus"
 
     def __init__(self, entry: ConfigEntry, coordinator):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "SWC Low"
-        self._attr_unique_id = f"{entry.entry_id}_swc_low"
+        self._attr_name = "SWC Low Mode"
+        self._attr_unique_id = f"{entry.entry_id}_swc_low_mode"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Exo Pool",
@@ -318,9 +318,9 @@ class SWCLowSwitch(CoordinatorEntity, SwitchEntity):
 
     @property
     def is_on(self):
-        """Return the state of SWC Low."""
+        """Return the state of SWC low mode."""
         return bool(
-            self.coordinator.data.get("equipment", {}).get("swc_0", {}).get("swc_low")
+            self.coordinator.data.get("equipment", {}).get("swc_0", {}).get("low")
         )
 
     @property
@@ -333,13 +333,13 @@ class SWCLowSwitch(CoordinatorEntity, SwitchEntity):
         )
 
     async def async_turn_on(self):
-        """Turn on SWC Low."""
-        await set_pool_value(self.hass, self._entry, "swc_low", 1, delay_refresh=True)
+        """Turn on SWC low mode."""
+        await set_pool_value(self.hass, self._entry, "low", 1, delay_refresh=True)
         self._attr_is_on = True  # Optimistic update
         self.async_write_ha_state()
 
     async def async_turn_off(self):
-        """Turn off SWC Low."""
-        await set_pool_value(self.hass, self._entry, "swc_low", 0, delay_refresh=True)
+        """Turn off SWC low mode."""
+        await set_pool_value(self.hass, self._entry, "low", 0, delay_refresh=True)
         self._attr_is_on = False  # Optimistic update
         self.async_write_ha_state()

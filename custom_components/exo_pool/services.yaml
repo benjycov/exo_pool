@@ -36,6 +36,21 @@ set_schedule:
           max: 4000
           step: 50
 
+reload:
+  name: Reload
+  description: Reload the Exo Pool integration. If you only have one entry, no data is required.
+  target:
+    device:
+      integration: exo_pool
+  fields:
+    entry_id:
+      name: Config entry
+      description: Exo Pool config entry to reload. Optional if targeting a device.
+      required: false
+      selector:
+        config_entry:
+          integration: exo_pool
+
 disable_schedule:
   name: Disable schedule
   description: Disable a schedule by setting start and end to 00:00.

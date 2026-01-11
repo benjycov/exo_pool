@@ -3,7 +3,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.const import UnitOfTime
+from homeassistant.const import PERCENTAGE, UnitOfTime
 from .api import (
     get_coordinator,
     set_pool_value,
@@ -34,6 +34,8 @@ async def async_setup_entry(
     entities: list[NumberEntity] = []
     # Always add refresh interval control
     entities.append(ExoPoolRefreshIntervalNumber(entry, coordinator))
+    entities.append(ExoPoolSwcOutputNumber(entry, coordinator))
+    entities.append(ExoPoolSwcLowOutputNumber(entry, coordinator))
     if orp_capable:
         entities.append(ExoPoolORPSetPointNumber(entry, coordinator))
     if ph_capable:
@@ -129,6 +131,84 @@ class ExoPoolPHSetPointNumber(CoordinatorEntity, NumberEntity):
             .get("ph_only", 0)
             == 1
         )
+
+
+class ExoPoolSwcOutputNumber(CoordinatorEntity, NumberEntity):
+    """Representation of an Exo Pool SWC output number entity."""
+
+    _attr_icon = "mdi:water-percent"
+    _attr_mode = "box"
+    _attr_step = 1
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_unit_of_measurement = PERCENTAGE
+
+    def __init__(self, entry: ConfigEntry, coordinator):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_name = "SWC Output"
+        self._attr_unique_id = f"{entry.entry_id}_swc_output_set"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": "Exo Pool",
+            "manufacturer": "Zodiac",
+        }
+
+    @property
+    def native_value(self):
+        """Return the current SWC output value."""
+        return self.coordinator.data.get("equipment", {}).get("swc_0", {}).get("swc")
+
+    async def async_set_native_value(self, value):
+        """Set the SWC output value."""
+        await set_pool_value(self.hass, self._entry, "swc", int(value))
+        await self.coordinator.async_request_refresh()
+
+    @property
+    def available(self):
+        """Return availability based on data fetch success."""
+        return self.coordinator.data is not None and bool(self.coordinator.data)
+
+
+class ExoPoolSwcLowOutputNumber(CoordinatorEntity, NumberEntity):
+    """Representation of an Exo Pool SWC low output number entity."""
+
+    _attr_icon = "mdi:water-percent"
+    _attr_mode = "box"
+    _attr_step = 1
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_unit_of_measurement = PERCENTAGE
+
+    def __init__(self, entry: ConfigEntry, coordinator):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_name = "SWC Low Output"
+        self._attr_unique_id = f"{entry.entry_id}_swc_low_output_set"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": "Exo Pool",
+            "manufacturer": "Zodiac",
+        }
+
+    @property
+    def native_value(self):
+        """Return the current SWC low output value."""
+        return (
+            self.coordinator.data.get("equipment", {})
+            .get("swc_0", {})
+            .get("swc_low")
+        )
+
+    async def async_set_native_value(self, value):
+        """Set the SWC low output value."""
+        await set_pool_value(self.hass, self._entry, "swc_low", int(value))
+        await self.coordinator.async_request_refresh()
+
+    @property
+    def available(self):
+        """Return availability based on data fetch success."""
+        return self.coordinator.data is not None and bool(self.coordinator.data)
 
 
 class ExoPoolRefreshIntervalNumber(CoordinatorEntity, NumberEntity):
