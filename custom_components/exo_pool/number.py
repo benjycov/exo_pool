@@ -26,22 +26,50 @@ async def async_setup_entry(
     # Retrieve shared coordinator
     coordinator = await get_coordinator(hass, entry)
 
-    # Add only supported number entities based on capabilities
-    swc = coordinator.data.get("equipment", {}).get("swc_0", {}) if coordinator.data else {}
-    ph_capable = swc.get("ph_only", 0) == 1
-    orp_capable = swc.get("dual_link", 0) == 1
+    def _capabilities() -> tuple[bool, bool]:
+        swc = (
+            coordinator.data.get("equipment", {}).get("swc_0", {})
+            if coordinator.data
+            else {}
+        )
+        ph_capable = swc.get("ph_only", 0) == 1
+        orp_capable = swc.get("dual_link", 0) == 1
+        return ph_capable, orp_capable
 
-    entities: list[NumberEntity] = []
-    # Always add refresh interval control
-    entities.append(ExoPoolRefreshIntervalNumber(entry, coordinator))
-    entities.append(ExoPoolSwcOutputNumber(entry, coordinator))
-    entities.append(ExoPoolSwcLowOutputNumber(entry, coordinator))
+    entities: list[NumberEntity] = [
+        ExoPoolRefreshIntervalNumber(entry, coordinator),
+        ExoPoolSwcOutputNumber(entry, coordinator),
+        ExoPoolSwcLowOutputNumber(entry, coordinator),
+    ]
+
+    ph_capable, orp_capable = _capabilities()
+    created_orp = False
+    created_ph = False
     if orp_capable:
         entities.append(ExoPoolORPSetPointNumber(entry, coordinator))
+        created_orp = True
     if ph_capable:
         entities.append(ExoPoolPHSetPointNumber(entry, coordinator))
+        created_ph = True
 
     async_add_entities(entities)
+
+    def _maybe_add_capabilities() -> None:
+        nonlocal created_orp, created_ph
+        ph_capable_now, orp_capable_now = _capabilities()
+        new_entities: list[NumberEntity] = []
+        if orp_capable_now and not created_orp:
+            new_entities.append(ExoPoolORPSetPointNumber(entry, coordinator))
+            created_orp = True
+            _LOGGER.debug("Discovered ORP capability; adding ORP set point number")
+        if ph_capable_now and not created_ph:
+            new_entities.append(ExoPoolPHSetPointNumber(entry, coordinator))
+            created_ph = True
+            _LOGGER.debug("Discovered pH capability; adding pH set point number")
+        if new_entities:
+            async_add_entities(new_entities)
+
+    coordinator.async_add_listener(_maybe_add_capabilities)
 
 
 class ExoPoolORPSetPointNumber(CoordinatorEntity, NumberEntity):
@@ -72,8 +100,6 @@ class ExoPoolORPSetPointNumber(CoordinatorEntity, NumberEntity):
     async def async_set_native_value(self, value):
         """Set the ORP set point value."""
         await set_pool_value(self.hass, self._entry, "orp_sp", int(value))
-        # Refresh coordinator to reflect updated state
-        await self.coordinator.async_request_refresh()
 
     @property
     def available(self):
@@ -117,8 +143,6 @@ class ExoPoolPHSetPointNumber(CoordinatorEntity, NumberEntity):
     async def async_set_native_value(self, value):
         """Set the pH set point value."""
         await set_pool_value(self.hass, self._entry, "ph_sp", value * 10)
-        # Refresh coordinator to reflect updated state
-        await self.coordinator.async_request_refresh()
 
     @property
     def available(self):
@@ -162,7 +186,6 @@ class ExoPoolSwcOutputNumber(CoordinatorEntity, NumberEntity):
     async def async_set_native_value(self, value):
         """Set the SWC output value."""
         await set_pool_value(self.hass, self._entry, "swc", int(value))
-        await self.coordinator.async_request_refresh()
 
     @property
     def available(self):
@@ -195,15 +218,12 @@ class ExoPoolSwcLowOutputNumber(CoordinatorEntity, NumberEntity):
     def native_value(self):
         """Return the current SWC low output value."""
         return (
-            self.coordinator.data.get("equipment", {})
-            .get("swc_0", {})
-            .get("swc_low")
+            self.coordinator.data.get("equipment", {}).get("swc_0", {}).get("swc_low")
         )
 
     async def async_set_native_value(self, value):
         """Set the SWC low output value."""
         await set_pool_value(self.hass, self._entry, "swc_low", int(value))
-        await self.coordinator.async_request_refresh()
 
     @property
     def available(self):

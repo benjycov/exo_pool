@@ -1,3 +1,7 @@
+from dataclasses import dataclass, field
+import random
+from typing import Callable
+
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -41,6 +45,257 @@ REFRESH_MIN = 300
 REFRESH_MAX = 3600
 BOOST_INTERVAL = 10
 BOOST_DURATION = 60
+MIN_REQUEST_INTERVAL = 5.0
+DEBOUNCED_REFRESH_DELAY = 30.0
+WRITE_GAP_SECONDS = 8.0
+POST_WRITE_COOLDOWN_SECONDS = 45.0
+NO_READ_WINDOW_SECONDS = 30.0
+MIN_REFRESH_GUARD_SECONDS = 120.0
+SCHEDULE_REFRESH_DELAY = 180.0
+READ_DEFERRAL_JITTER_MIN = 15.0
+READ_DEFERRAL_JITTER_MAX = 45.0
+DEBOUNCE_JITTER_MIN = 30.0
+DEBOUNCE_JITTER_MAX = 90.0
+
+
+async def _async_rate_limit(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Ensure a minimum delay between API requests for a config entry."""
+    store = _get_entry_store(hass, entry)
+    lock = store.setdefault("request_lock", asyncio.Lock())
+    async with lock:
+        last_request = store.get("last_request_ts")
+        now = time.monotonic()
+        if last_request is not None:
+            wait_time = MIN_REQUEST_INTERVAL - (now - last_request)
+            if wait_time > 0:
+                _LOGGER.debug(
+                    "Rate limiting API request for %s, sleeping %.2fs",
+                    entry.entry_id,
+                    wait_time,
+                )
+                await asyncio.sleep(wait_time)
+        store["last_request_ts"] = time.monotonic()
+
+
+def _get_cooldown_until(store: dict) -> float:
+    return float(store.get("cooldown_until", 0.0))
+
+
+def _is_write_active(store: dict) -> bool:
+    quiet_until = float(store.get("write_quiet_until", 0.0))
+    return store.get("write_in_flight", 0) > 0 or time.monotonic() < quiet_until
+
+
+def _cooldown_remaining(hass: HomeAssistant, entry: ConfigEntry) -> float:
+    store = _get_entry_store(hass, entry)
+    remaining = _get_cooldown_until(store) - time.monotonic()
+    return max(0.0, remaining)
+
+
+def _set_cooldown(
+    hass: HomeAssistant, entry: ConfigEntry, seconds: float, *, reason: str
+) -> None:
+    store = _get_entry_store(hass, entry)
+    cooldown_until = time.monotonic() + seconds
+    store["cooldown_until"] = max(_get_cooldown_until(store), cooldown_until)
+    _LOGGER.debug(
+        "Cooldown set for %s: %.1fs (%s)",
+        entry.entry_id,
+        seconds,
+        reason,
+    )
+
+
+def _schedule_debounced_refresh(
+    hass: HomeAssistant, entry: ConfigEntry, *, delay: float = DEBOUNCED_REFRESH_DELAY
+) -> None:
+    """Schedule a single refresh after delay or cooldown, whichever is later."""
+    store = _get_entry_store(hass, entry)
+    now = time.monotonic()
+    target = max(now + delay, _get_cooldown_until(store))
+    target += random.uniform(DEBOUNCE_JITTER_MIN, DEBOUNCE_JITTER_MAX)
+    if target <= now:
+        target = now
+
+    def _clear_debounce_task() -> None:
+        store.pop("debounce_refresh_task", None)
+        store.pop("refresh_deadline", None)
+
+    if existing_deadline := store.get("refresh_deadline"):
+        if existing_deadline >= target:
+            return
+        if task := store.get("debounce_refresh_task"):
+            task.cancel()
+
+    async def _refresh_later() -> None:
+        try:
+            await asyncio.sleep(max(0.0, target - time.monotonic()))
+        except asyncio.CancelledError:
+            return
+        no_read_until = store.get("no_read_until")
+        if no_read_until and time.monotonic() < no_read_until:
+            _clear_debounce_task()
+            _schedule_debounced_refresh(hass, entry, delay=0.0)
+            return
+        if _cooldown_remaining(hass, entry) > 0:
+            _clear_debounce_task()
+            _schedule_debounced_refresh(hass, entry, delay=0.0)
+            return
+        last_ok = store.get("last_success_fetch_ts")
+        if last_ok and time.monotonic() - last_ok < MIN_REFRESH_GUARD_SECONDS:
+            _clear_debounce_task()
+            return
+        _clear_debounce_task()
+        await async_request_refresh(hass, entry, allow_debounce=False)
+
+    store["refresh_deadline"] = target
+    store["debounce_refresh_task"] = hass.async_create_task(_refresh_later())
+
+
+def _should_defer_refresh(hass: HomeAssistant, entry: ConfigEntry, store: dict) -> bool:
+    no_read_until = store.get("no_read_until")
+    if no_read_until and time.monotonic() < no_read_until:
+        return True
+    if _is_write_active(store):
+        store["write_defer_seconds"] = random.uniform(
+            READ_DEFERRAL_JITTER_MIN, READ_DEFERRAL_JITTER_MAX
+        )
+        return True
+    if _cooldown_remaining(hass, entry) > 0:
+        return True
+    return False
+
+
+async def async_request_refresh(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    *,
+    manual: bool = False,
+    allow_debounce: bool = True,
+) -> bool:
+    """Request a refresh, respecting any cooldown."""
+    store = _get_entry_store(hass, entry)
+    if _should_defer_refresh(hass, entry, store):
+        if allow_debounce:
+            delay = float(store.pop("write_defer_seconds", 0.0))
+            _schedule_debounced_refresh(hass, entry, delay=delay)
+        if manual:
+            _LOGGER.debug("Manual refresh deferred (cooldown/write active), serving cached")
+        return False
+    coordinator = store.get("coordinator")
+    if coordinator:
+        if manual:
+            _LOGGER.debug("Manual refresh requested, fetching now")
+        await coordinator.async_request_refresh()
+        return True
+    return False
+
+def _merge_dict(base: dict, update: dict) -> dict:
+    merged = dict(base)
+    for key, value in update.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_dict(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+@dataclass
+class _WriteItem:
+    kind: str
+    key: str
+    target: str
+    payload: dict
+    futures: list[asyncio.Future] = field(default_factory=list)
+    merge_func: Callable[[dict, dict], dict] | None = None
+    extra_delay: float = 0.0
+
+
+class _WriteManager:
+    """Serialize and coalesce write operations per config entry."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        self._hass = hass
+        self._entry = entry
+        self._pending: dict[str, _WriteItem] = {}
+        self._order: list[str] = []
+        self._worker_task: asyncio.Task | None = None
+        self._lock = asyncio.Lock()
+
+    async def enqueue(self, item: _WriteItem) -> None:
+        async with self._lock:
+            store = _get_entry_store(self._hass, self._entry)
+            store["no_read_until"] = time.monotonic() + NO_READ_WINDOW_SECONDS
+            existing = self._pending.get(item.key)
+            if existing:
+                if existing.merge_func:
+                    existing.payload = existing.merge_func(
+                        existing.payload, item.payload
+                    )
+                else:
+                    existing.payload = item.payload
+                existing.extra_delay = max(existing.extra_delay, item.extra_delay)
+                existing.futures.extend(item.futures)
+            else:
+                self._pending[item.key] = item
+                self._order.append(item.key)
+            if self._worker_task is None or self._worker_task.done():
+                self._worker_task = self._hass.async_create_task(self._worker())
+
+    async def _worker(self) -> None:
+        while True:
+            async with self._lock:
+                if not self._order:
+                    return
+                key = self._order.pop(0)
+                item = self._pending.pop(key, None)
+            if item is None:
+                continue
+
+            cooldown = _cooldown_remaining(self._hass, self._entry)
+            if cooldown > 0:
+                await asyncio.sleep(cooldown)
+
+            try:
+                store = _get_entry_store(self._hass, self._entry)
+                store["write_in_flight"] = store.get("write_in_flight", 0) + 1
+                await _execute_write(self._hass, self._entry, item)
+            except Exception as err:
+                for future in item.futures:
+                    if not future.done():
+                        future.set_exception(err)
+            else:
+                for future in item.futures:
+                    if not future.done():
+                        future.set_result(None)
+                _set_cooldown(
+                    self._hass,
+                    self._entry,
+                    POST_WRITE_COOLDOWN_SECONDS + item.extra_delay,
+                    reason="post_write",
+                )
+                store = _get_entry_store(self._hass, self._entry)
+                store["write_quiet_until"] = time.monotonic() + POST_WRITE_COOLDOWN_SECONDS
+                if item.kind == "schedule":
+                    _schedule_debounced_refresh(
+                        self._hass, self._entry, delay=SCHEDULE_REFRESH_DELAY
+                    )
+            finally:
+                store = _get_entry_store(self._hass, self._entry)
+                store["write_in_flight"] = max(
+                    0, store.get("write_in_flight", 0) - 1
+                )
+
+            await asyncio.sleep(WRITE_GAP_SECONDS)
+
+
+def _get_write_manager(hass: HomeAssistant, entry: ConfigEntry) -> _WriteManager:
+    store = _get_entry_store(hass, entry)
+    manager = store.get("write_manager")
+    if manager is None:
+        manager = _WriteManager(hass, entry)
+        store["write_manager"] = manager
+    return manager
 
 
 async def async_update_data(hass: HomeAssistant, entry: ConfigEntry):
@@ -48,6 +303,24 @@ async def async_update_data(hass: HomeAssistant, entry: ConfigEntry):
     global _authentication_failed, _last_auth_error
     _authentication_failed = False  # Reset flag
     _last_auth_error = None
+    store = _get_entry_store(hass, entry)
+    no_read_until = store.get("no_read_until")
+    if no_read_until and time.monotonic() < no_read_until:
+        _schedule_debounced_refresh(hass, entry, delay=0.0)
+        coordinator = store.get("coordinator")
+        return coordinator.data or {}
+    if _is_write_active(store):
+        _schedule_debounced_refresh(
+            hass,
+            entry,
+            delay=random.uniform(READ_DEFERRAL_JITTER_MIN, READ_DEFERRAL_JITTER_MAX),
+        )
+        coordinator = store.get("coordinator")
+        return coordinator.data or {}
+    if _cooldown_remaining(hass, entry) > 0:
+        _schedule_debounced_refresh(hass, entry, delay=0.0)
+        coordinator = store.get("coordinator")
+        return coordinator.data or {}
     serial_number = entry.data["serial_number"]
     id_token = entry.data.get("id_token")
     expires_at = entry.data.get("expires_at", 0)
@@ -69,9 +342,7 @@ async def async_update_data(hass: HomeAssistant, entry: ConfigEntry):
             try:
                 refreshed = await _refresh_token(hass, entry, session)
             except Exception as e:
-                _LOGGER.debug(
-                    "Token refresh failed: %s, falling back to full login", e
-                )
+                _LOGGER.debug("Token refresh failed: %s, falling back to full login", e)
 
         if not refreshed:
             # Full login
@@ -87,6 +358,7 @@ async def async_update_data(hass: HomeAssistant, entry: ConfigEntry):
         "Authorization": f"Bearer {id_token}",
     }
     _LOGGER.debug("Fetching data for serial_number: %s", serial_number)
+    await _async_rate_limit(hass, entry)
     async with session.get(
         DATA_URL_TEMPLATE.format(serial_number), headers=headers
     ) as response:
@@ -99,9 +371,7 @@ async def async_update_data(hass: HomeAssistant, entry: ConfigEntry):
             if is_rate_limited:
                 _LOGGER.warning("Rate limited fetching device data: %s", error_text)
                 coordinator = (
-                    hass.data.get(DOMAIN, {})
-                    .get(entry.entry_id, {})
-                    .get("coordinator")
+                    hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("coordinator")
                 )
                 if coordinator:
                     try:
@@ -112,15 +382,19 @@ async def async_update_data(hass: HomeAssistant, entry: ConfigEntry):
                             timedelta(seconds=REFRESH_DEFAULT),
                         )
                         cur_s = (
-                            int(current.total_seconds())
-                            if current
-                            else REFRESH_DEFAULT
+                            int(current.total_seconds()) if current else REFRESH_DEFAULT
                         )
                         if coordinator.data:
                             # Exponential backoff up to REFRESH_MAX
                             new_s = max(cur_s, min(cur_s * 2, REFRESH_MAX))
                             if new_s != cur_s:
                                 coordinator.update_interval = timedelta(seconds=new_s)
+                                _set_cooldown(
+                                    hass,
+                                    entry,
+                                    new_s,
+                                    reason="read_429",
+                                )
                                 _LOGGER.warning(
                                     "429 Too Many Requests, backing off to %ss",
                                     new_s,
@@ -133,8 +407,12 @@ async def async_update_data(hass: HomeAssistant, entry: ConfigEntry):
                         else:
                             retry_s = max(60, min(configured, REFRESH_MAX))
                             if retry_s != cur_s:
-                                coordinator.update_interval = timedelta(
-                                    seconds=retry_s
+                                coordinator.update_interval = timedelta(seconds=retry_s)
+                                _set_cooldown(
+                                    hass,
+                                    entry,
+                                    retry_s,
+                                    reason="read_429",
                                 )
                                 _LOGGER.warning(
                                     "429 Too Many Requests, retrying in %ss",
@@ -145,6 +423,17 @@ async def async_update_data(hass: HomeAssistant, entry: ConfigEntry):
                             "Backoff adjustment failed: %s",
                             backoff_error,
                         )
+                    backoff_interval = getattr(
+                        coordinator,
+                        "update_interval",
+                        timedelta(seconds=REFRESH_DEFAULT),
+                    )
+                    _set_cooldown(
+                        hass,
+                        entry,
+                        int(backoff_interval.total_seconds()),
+                        reason="read_429",
+                    )
                     # Return previous data or empty data to avoid startup failure
                     _LOGGER.debug(
                         "Rate limited, returning cached data to keep coordinator loaded"
@@ -162,6 +451,7 @@ async def async_update_data(hass: HomeAssistant, entry: ConfigEntry):
         coordinator = (
             hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("coordinator")
         )
+        store["last_success_fetch_ts"] = time.monotonic()
         if coordinator:
             configured = _get_configured_interval_seconds(entry)
             current = getattr(
@@ -193,6 +483,7 @@ async def _full_login(
         "password": entry.data["password"],
     }
     _LOGGER.debug("Login payload: %s", {**payload, "password": "REDACTED"})
+    await _async_rate_limit(hass, entry)
     async with session.post(LOGIN_URL, json=payload, headers=headers) as response:
         _LOGGER.debug("Login response status: %s", response.status)
         if response.status != 200:
@@ -248,6 +539,7 @@ async def _refresh_token(
         "refresh_token": entry.data["refresh_token"],
     }
     _LOGGER.debug("Refresh token payload: %s", {**payload, "refresh_token": "REDACTED"})
+    await _async_rate_limit(hass, entry)
     async with session.post(REFRESH_URL, json=payload, headers=headers) as response:
         _LOGGER.debug("Refresh response status: %s", response.status)
         if response.status != 200:
@@ -338,6 +630,109 @@ async def _async_boost_refresh_interval(
     store["boost_task"] = hass.async_create_task(_reset_interval())
 
 
+def _set_nested_value(target: dict, keys: list[str], value) -> None:
+    """Set a nested value in a dict, creating missing dicts as needed."""
+    node = target
+    for key in keys[:-1]:
+        node = node.setdefault(key, {})
+    node[keys[-1]] = value
+
+
+def _build_nested_dict(keys: list[str], value) -> dict:
+    nested = value
+    for key in reversed(keys):
+        nested = {key: nested}
+    return nested
+
+
+def _apply_desired_update(
+    coordinator: DataUpdateCoordinator, keys: list[str], value
+) -> None:
+    """Optimistically update coordinator data with a desired-value change."""
+    data = coordinator.data or {}
+    _set_nested_value(data, keys, value)
+    coordinator.async_set_updated_data(data)
+
+
+def _apply_heating_update(coordinator: DataUpdateCoordinator, key: str, value) -> None:
+    """Optimistically update coordinator data for heating changes."""
+    data = coordinator.data or {}
+    heating = data.setdefault("heating", {})
+    heating[key] = value
+    coordinator.async_set_updated_data(data)
+
+
+def _apply_schedule_update(
+    coordinator: DataUpdateCoordinator, schedule_key: str, patch: dict
+) -> None:
+    """Optimistically update coordinator data for schedule changes."""
+    data = coordinator.data or {}
+    schedules = data.setdefault("schedules", {})
+    schedule = schedules.setdefault(schedule_key, {})
+    schedule.update(patch)
+    coordinator.async_set_updated_data(data)
+
+
+async def _execute_write(
+    hass: HomeAssistant, entry: ConfigEntry, item: _WriteItem
+) -> None:
+    serial_number = entry.data["serial_number"]
+    id_token = entry.data.get("id_token")
+    if not id_token:
+        raise Exception(f"No id_token available for write {item.key}")
+
+    if item.kind == "pool":
+        payload = {"state": {"desired": {"equipment": {"swc_0": item.payload}}}}
+    elif item.kind == "heating":
+        payload = {"state": {"desired": {"heating": {item.target: item.payload}}}}
+    elif item.kind == "schedule":
+        payload = {"state": {"desired": {"schedules": {item.target: item.payload}}}}
+    else:
+        raise Exception(f"Unknown write kind: {item.kind}")
+
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "User-Agent": "okhttp/3.14.7",
+        "Authorization": f"Bearer {id_token}",
+    }
+    url = DATA_URL_TEMPLATE.format(serial_number)
+    _LOGGER.debug(
+        "Writing %s at %s with payload: %s",
+        item.key,
+        url,
+        payload,
+    )
+    session = aiohttp_client.async_get_clientsession(hass)
+    await _async_rate_limit(hass, entry)
+    async with session.post(url, json=payload, headers=headers) as response:
+        response_text = await response.text()
+        _LOGGER.debug(
+            "Write response for %s: %s %s",
+            item.key,
+            response.status,
+            response_text,
+        )
+        if response.status == 429:
+            _LOGGER.warning("Rate limited during write %s: %s", item.key, response_text)
+            _set_cooldown(
+                hass,
+                entry,
+                _get_configured_interval_seconds(entry),
+                reason="write_429",
+            )
+            raise Exception(f"Rate limited for write {item.key}: {response_text}")
+        if response.status != 200:
+            _LOGGER.error(
+                "Write failed for %s: %s (Status: %s)",
+                item.key,
+                response_text,
+                response.status,
+            )
+            raise Exception(
+                f"Write failed for {item.key}: {response_text} (Status: {response.status})"
+            )
+
+
 async def get_coordinator(hass: HomeAssistant, entry: ConfigEntry):
     """Get or create a shared DataUpdateCoordinator for the config entry."""
     store = _get_entry_store(hass, entry)
@@ -386,100 +781,51 @@ async def async_set_refresh_interval(
 
 async def set_pool_value(hass, entry, setting, value, delay_refresh=False):
     """Set a pool setting value via the API."""
-    serial_number = entry.data["serial_number"]
     id_token = entry.data.get("id_token")
     if not id_token:
         _LOGGER.error("No id_token available for setting %s", setting)
         return
 
-    # Build nested dict for setting
-    def build_nested_dict(keys, val):
-        d = val
-        for key in reversed(keys):
-            d = {key: d}
-        return d
-
     keys = setting.split(".")
-    nested_value = build_nested_dict(keys, value)
+    nested_value = _build_nested_dict(keys, value)
+    coordinator = _get_entry_store(hass, entry).get("coordinator")
+    if coordinator:
+        _apply_desired_update(coordinator, ["equipment", "swc_0"] + keys, value)
 
-    payload = {"state": {"desired": {"equipment": {"swc_0": nested_value}}}}
-    headers = {
-        "Content-Type": "application/json; charset=utf-8",
-        "User-Agent": "okhttp/3.14.7",
-        "Authorization": f"Bearer {id_token}",
-    }
-    url = DATA_URL_TEMPLATE.format(serial_number)
-    _LOGGER.debug(
-        "Setting %s to %s at %s with payload: %s and headers: %s",
-        setting,
-        value,
-        url,
-        payload,
-        {k: v if k != "Authorization" else v[:10] + "..." for k, v in headers.items()},
+    future = asyncio.get_running_loop().create_future()
+    item = _WriteItem(
+        kind="pool",
+        key=f"pool:{setting}",
+        target=setting,
+        payload=nested_value,
+        futures=[future],
+        extra_delay=10.0 if delay_refresh else 0.0,
     )
-    session = aiohttp_client.async_get_clientsession(hass)
-    async with session.post(url, json=payload, headers=headers) as response:
-            response_text = await response.text()
-            _LOGGER.debug(
-                "Response status: %s, body: %s", response.status, response_text
-            )
-            if response.status != 200:
-                _LOGGER.error(
-                    "Failed to set %s: %s (Status: %s)",
-                    setting,
-                    response_text,
-                    response.status,
-                )
-            else:
-                _LOGGER.debug("Successfully set %s to %s", setting, value)
-                # Refresh coordinator with delay if requested
-                if delay_refresh:
-                    await asyncio.sleep(10)  # Wait 10 seconds for Exo to update
-                await _async_boost_refresh_interval(hass, entry)
-                coordinator = _get_entry_store(hass, entry)["coordinator"]
-                await coordinator.async_request_refresh()
+    await _get_write_manager(hass, entry).enqueue(item)
+    await future
 
 
 async def set_heating_value(hass, entry, key: str, value, delay_refresh: bool = False):
     """Set a top-level heating value via the API (e.g., sp)."""
-    serial_number = entry.data["serial_number"]
     id_token = entry.data.get("id_token")
     if not id_token:
         _LOGGER.error("No id_token available for heating.%s", key)
         return
+    coordinator = _get_entry_store(hass, entry).get("coordinator")
+    if coordinator:
+        _apply_heating_update(coordinator, key, value)
 
-    payload = {"state": {"desired": {"heating": {key: value}}}}
-    headers = {
-        "Content-Type": "application/json; charset=utf-8",
-        "User-Agent": "okhttp/3.14.7",
-        "Authorization": f"Bearer {id_token}",
-    }
-    url = DATA_URL_TEMPLATE.format(serial_number)
-    _LOGGER.debug(
-        "Setting heating.%s to %s at %s with payload: %s",
-        key,
-        value,
-        url,
-        payload,
+    future = asyncio.get_running_loop().create_future()
+    item = _WriteItem(
+        kind="heating",
+        key=f"heating:{key}",
+        target=key,
+        payload=value,
+        futures=[future],
+        extra_delay=10.0 if delay_refresh else 0.0,
     )
-    session = aiohttp_client.async_get_clientsession(hass)
-    async with session.post(url, json=payload, headers=headers) as response:
-        response_text = await response.text()
-        _LOGGER.debug("Heating set response status: %s, body: %s", response.status, response_text)
-        if response.status != 200:
-            _LOGGER.error(
-                "Failed to set heating.%s: %s (Status: %s)",
-                key,
-                response_text,
-                response.status,
-            )
-        else:
-            _LOGGER.debug("Successfully set heating.%s to %s", key, value)
-            if delay_refresh:
-                await asyncio.sleep(10)
-            await _async_boost_refresh_interval(hass, entry)
-            coordinator = _get_entry_store(hass, entry)["coordinator"]
-            await coordinator.async_request_refresh()
+    await _get_write_manager(hass, entry).enqueue(item)
+    await future
 
 
 async def update_schedule(
@@ -492,7 +838,6 @@ async def update_schedule(
     rpm: int | None = None,
 ):
     """Update a schedule's timer (and rpm for VSP) via the API."""
-    serial_number = entry.data["serial_number"]
     id_token = entry.data.get("id_token")
     if not id_token:
         _LOGGER.error("No id_token available for schedule %s", schedule_key)
@@ -511,33 +856,22 @@ async def update_schedule(
             sched_patch["rpm"] = int(rpm)
         except (TypeError, ValueError):
             _LOGGER.warning("Invalid rpm value %s for schedule %s", rpm, schedule_key)
+    if not sched_patch:
+        _LOGGER.debug("No schedule updates provided for %s", schedule_key)
+        return
 
-    payload = {"state": {"desired": {"schedules": {schedule_key: sched_patch}}}}
-    headers = {
-        "Content-Type": "application/json; charset=utf-8",
-        "User-Agent": "okhttp/3.14.7",
-        "Authorization": f"Bearer {id_token}",
-    }
-    url = DATA_URL_TEMPLATE.format(serial_number)
-    _LOGGER.debug(
-        "Updating schedule %s at %s with payload: %s",
-        schedule_key,
-        url,
-        payload,
+    coordinator = _get_entry_store(hass, entry).get("coordinator")
+    if coordinator:
+        _apply_schedule_update(coordinator, schedule_key, sched_patch)
+
+    future = asyncio.get_running_loop().create_future()
+    item = _WriteItem(
+        kind="schedule",
+        key=f"schedule:{schedule_key}",
+        target=schedule_key,
+        payload=sched_patch,
+        futures=[future],
+        merge_func=_merge_dict,
     )
-    session = aiohttp_client.async_get_clientsession(hass)
-    async with session.post(url, json=payload, headers=headers) as response:
-        response_text = await response.text()
-        _LOGGER.debug("Schedule update response: %s %s", response.status, response_text)
-        if response.status != 200:
-            _LOGGER.error(
-                "Failed to update schedule %s: %s (Status: %s)",
-                schedule_key,
-                response_text,
-                response.status,
-            )
-            raise Exception(f"Schedule update failed: {response_text}")
-    # Refresh to reflect updated schedule
-    await _async_boost_refresh_interval(hass, entry)
-    coordinator = _get_entry_store(hass, entry)["coordinator"]
-    await coordinator.async_request_refresh()
+    await _get_write_manager(hass, entry).enqueue(item)
+    await future

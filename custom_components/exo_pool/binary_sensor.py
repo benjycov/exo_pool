@@ -36,6 +36,7 @@ async def async_setup_entry(
         SaltWaterChlorinatorBinarySensor(entry, coordinator),
         AuthenticationStatusBinarySensor(entry, coordinator),
         ConnectedBinarySensor(entry, coordinator),
+        AwsConnectivityBinarySensor(entry, coordinator),
     ]
 
     # Add a binary sensor per schedule item
@@ -270,6 +271,43 @@ class ConnectedBinarySensor(CoordinatorEntity, BinarySensorEntity):
             "Connected sensor availability check: coordinator.data=%s",
             self.coordinator.data is not None,
         )
+        return self.coordinator.data is not None
+
+
+class AwsConnectivityBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """Representation of AWS connectivity status."""
+
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_icon = "mdi:cloud-check"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, entry: ConfigEntry, coordinator: DataUpdateCoordinator):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_name = "AWS Status"
+        self._attr_unique_id = f"{entry.entry_id}_aws_connection"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
+        }
+
+    @property
+    def is_on(self) -> bool | None:
+        status = (self.coordinator.data or {}).get("aws", {}).get("status")
+        if status is None:
+            return None
+        return status == "connected"
+
+    @property
+    def extra_state_attributes(self):
+        status = (self.coordinator.data or {}).get("aws", {}).get("status")
+        return {"status": status}
+
+    @property
+    def available(self):
+        """Return availability based on data fetch success."""
         return self.coordinator.data is not None
 
 

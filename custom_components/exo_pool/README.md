@@ -3,6 +3,28 @@
 A custom integration to connect your Zodiac iAqualink **Exo** pool system to Home Assistant, providing full control and monitoring of your pool’s features.
 
 ## 🆕 What’s New
+- **6 Feb 2026**
+
+1) Much better protection against cloud rate-limits.
+  1.1) The integration now carefully spaces out API calls and avoids overlapping reads and writes.
+  1.2) This greatly reduces “Too Many Requests (429)” errors.
+2) Smarter handling of changes
+  2.1) When you adjust pH, ORP, or schedules, changes are queued and applied safely.
+  2.2) Multiple quick changes are merged together instead of hammering the cloud API.
+3) No more read/write collisions
+  3.1) The integration will not poll the cloud while a setting change is in progress.
+  3.2) A short “settling period” after changes prevents unnecessary follow-up requests.
+4) Improved schedule reliability
+  4.1) Schedule updates are applied more reliably, even when making multiple edits.
+  4.2) Optional delayed confirmation refresh avoids unnecessary cloud traffic.
+5) New manual refresh feature - you can force a data refresh (though all safety rails still apply)
+6) Optional entities now appear reliably
+  6.1) pH and ORP setpoint controls will appear automatically once the device reports support.
+  6.2) Temporary startup issues (for example during rate-limits) no longer cause them to disappear permanently.
+7) More robust startup behavior
+  7.1) If the cloud is temporarily unavailable during startup, the integration now recovers cleanly once connectivity returns.
+8) Added a 'AWS Status' to the diagnostics. This sensor indicates whether your Exo unit itself is connected to AWS.
+
 - **11 Jan 2026**
 
 1) Changes to refresh rates, now by default we only refresh data from the API every 5 minutes (this will gracefully reduce if 429s are detected), but temporarily boost the rate to every 10s when a user change (for example PH set point) is made.

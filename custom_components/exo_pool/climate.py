@@ -161,14 +161,12 @@ class ExoHeatPumpClimate(CoordinatorEntity, ClimateEntity):
             return
         value = max(int(min_t), min(int(max_t), value))
         await set_heating_value(self.hass, self._entry, "sp", value)
-        await self.coordinator.async_request_refresh()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         if hvac_mode == HVACMode.HEAT:
             await set_pool_value(self.hass, self._entry, "aux_2.state", 1)
         elif hvac_mode == HVACMode.OFF:
             await set_pool_value(self.hass, self._entry, "aux_2.state", 0)
-        await self.coordinator.async_request_refresh()
 
     async def async_turn_on(self) -> None:
         await self.async_set_hvac_mode(HVACMode.HEAT)
