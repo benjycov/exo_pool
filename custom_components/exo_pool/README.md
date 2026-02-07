@@ -3,6 +3,10 @@
 A custom integration to connect your Zodiac iAqualink **Exo** pool system to Home Assistant, providing full control and monitoring of your pool’s features.
 
 ## 🆕 What’s New
+
+- **7 Feb 2026**
+1) Small retry fix to get around 401 'token expired' errors on schedule write attempts (and associated logging updates).
+
 - **6 Feb 2026**
 
 1) Much better protection against cloud rate-limits.

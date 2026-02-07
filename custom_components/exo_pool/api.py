@@ -180,7 +180,9 @@ async def async_request_refresh(
             delay = float(store.pop("write_defer_seconds", 0.0))
             _schedule_debounced_refresh(hass, entry, delay=delay)
         if manual:
-            _LOGGER.debug("Manual refresh deferred (cooldown/write active), serving cached")
+            _LOGGER.debug(
+                "Manual refresh deferred (cooldown/write active), serving cached"
+            )
         return False
     coordinator = store.get("coordinator")
     if coordinator:
@@ -189,6 +191,7 @@ async def async_request_refresh(
         await coordinator.async_request_refresh()
         return True
     return False
+
 
 def _merge_dict(base: dict, update: dict) -> dict:
     merged = dict(base)
@@ -275,16 +278,16 @@ class _WriteManager:
                     reason="post_write",
                 )
                 store = _get_entry_store(self._hass, self._entry)
-                store["write_quiet_until"] = time.monotonic() + POST_WRITE_COOLDOWN_SECONDS
+                store["write_quiet_until"] = (
+                    time.monotonic() + POST_WRITE_COOLDOWN_SECONDS
+                )
                 if item.kind == "schedule":
                     _schedule_debounced_refresh(
                         self._hass, self._entry, delay=SCHEDULE_REFRESH_DELAY
                     )
             finally:
                 store = _get_entry_store(self._hass, self._entry)
-                store["write_in_flight"] = max(
-                    0, store.get("write_in_flight", 0) - 1
-                )
+                store["write_in_flight"] = max(0, store.get("write_in_flight", 0) - 1)
 
             await asyncio.sleep(WRITE_GAP_SECONDS)
 
@@ -703,34 +706,88 @@ async def _execute_write(
         payload,
     )
     session = aiohttp_client.async_get_clientsession(hass)
+    response_status, response_text = await _post_write(
+        hass, entry, session, url, payload, headers, item.key
+    )
+    if _is_token_expired_response(response_status, response_text):
+        _LOGGER.warning(
+            "Write got 401 unauthorized for %s; refreshing token and retrying once",
+            item.key,
+        )
+        await _refresh_authentication(hass, entry, session)
+        id_token = entry.data.get("id_token")
+        if not id_token:
+            raise Exception(f"No id_token available after refresh for write {item.key}")
+        headers["Authorization"] = f"Bearer {id_token}"
+        response_status, response_text = await _post_write(
+            hass, entry, session, url, payload, headers, item.key
+        )
+    if response_status == 429:
+        _LOGGER.warning("Rate limited during write %s: %s", item.key, response_text)
+        _set_cooldown(
+            hass,
+            entry,
+            _get_configured_interval_seconds(entry),
+            reason="write_429",
+        )
+        raise Exception(f"Rate limited for write {item.key}: {response_text}")
+    if response_status != 200:
+        _LOGGER.error(
+            "Write failed for %s: %s (Status: %s)",
+            item.key,
+            response_text,
+            response_status,
+        )
+        raise Exception(
+            f"Write failed for {item.key}: {response_text} (Status: {response_status})"
+        )
+
+
+def _is_token_expired_response(status: int, body: str) -> bool:
+    """Return True when a response indicates an expired or invalid token."""
+    if status != 401:
+        return False
+    if "token has expired" in body.lower():
+        return True
+    # Exo Pool uses 401 for auth failures, so refresh on any 401.
+    return True
+
+
+async def _refresh_authentication(
+    hass: HomeAssistant, entry: ConfigEntry, session: aiohttp.ClientSession
+) -> None:
+    """Refresh tokens using refresh_token when possible, falling back to full login."""
+    refreshed = False
+    if "refresh_token" in entry.data:
+        try:
+            refreshed = await _refresh_token(hass, entry, session)
+        except Exception as err:
+            _LOGGER.debug("Token refresh failed during write: %s", err)
+
+    if not refreshed:
+        await _full_login(hass, entry, session)
+
+
+async def _post_write(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    session: aiohttp.ClientSession,
+    url: str,
+    payload: dict,
+    headers: dict,
+    item_key: str,
+) -> tuple[int, str]:
+    """Post a write request and return the response status and body."""
     await _async_rate_limit(hass, entry)
     async with session.post(url, json=payload, headers=headers) as response:
         response_text = await response.text()
         _LOGGER.debug(
             "Write response for %s: %s %s",
-            item.key,
+            item_key,
             response.status,
             response_text,
         )
-        if response.status == 429:
-            _LOGGER.warning("Rate limited during write %s: %s", item.key, response_text)
-            _set_cooldown(
-                hass,
-                entry,
-                _get_configured_interval_seconds(entry),
-                reason="write_429",
-            )
-            raise Exception(f"Rate limited for write {item.key}: {response_text}")
-        if response.status != 200:
-            _LOGGER.error(
-                "Write failed for %s: %s (Status: %s)",
-                item.key,
-                response_text,
-                response.status,
-            )
-            raise Exception(
-                f"Write failed for {item.key}: {response_text} (Status: {response.status})"
-            )
+        return response.status, response_text
 
 
 async def get_coordinator(hass: HomeAssistant, entry: ConfigEntry):
