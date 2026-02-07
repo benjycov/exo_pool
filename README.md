@@ -4,6 +4,9 @@ A custom integration to connect your Zodiac iAqualink **Exo** pool system to Hom
 
 ## 🆕 What’s New
 
+- **7 Feb 2026**
+1) Small retry fix to get around 401 'token expired' errors on schedule write attempts (and associated logging updates).
+
 - **6 Feb 2026**
 
 1) Much better protection against cloud rate-limits.
@@ -30,7 +33,7 @@ A custom integration to connect your Zodiac iAqualink **Exo** pool system to Hom
 
 1) Changes to refresh rates, now by default we only refresh data from the API every 5 minutes (this will gracefully reduce if 429s are detected), but temporarily boost the rate to every 10s when a user change (for example PH set point) is made.
 2) SWC sensors were incorrect before. Now SWC normal and low levels are settable with the correct switch ('low' from shadow data) reflecting if low mode is enabled. In the future we will hide these levels for systems with an ORP sensor (like me), as the swc levels are all 0. For now though I have left it in for debugging purposes.
-3) Added a service exo_pool.reload - this will reload the integration if you determine for some reason it needs it (hopefully not with the new refresh timings).
+3) Added a service `exo_pool.reload` to reload the integration if you ever need it (ideally not with the new refresh timings).
 
 - **20 Oct 2025** - Modifications for SSP (Single Speed Pump) - single speed pumps should now be correctly recognised.
 - **23 Sep 2025** - Added experimental climate entity for systems with the heat pump enabled.
@@ -76,23 +79,46 @@ Create or update a schedule’s time range and optional VSP RPM.
 
 ```yaml
 service: exo_pool.set_schedule
-target:
-  entity_id: binary_sensor.schedule_filter_pump_2
 data:
+  entity_id: binary_sensor.schedule_filter_pump_2
   start: "11:00"
   end: "23:00"
   rpm: 2000
 ```
 
-You can also target the device and specify `schedule: sch6` instead of the entity.
+You can also target the device and specify `schedule: sch6` instead of the entity:
+
+```yaml
+service: exo_pool.set_schedule
+data:
+  device_id: 1a2b3c4d5e6f7g8h9i0j
+  schedule: sch6
+  start: "11:00"
+  end: "23:00"
+```
 
 ### `exo_pool.disable_schedule`
 Disable a schedule by setting start and end to `00:00`.
 
 ```yaml
 service: exo_pool.disable_schedule
-target:
+data:
   entity_id: binary_sensor.schedule_salt_water_chlorinator_2
+```
+
+### `exo_pool.reload`
+Reload the integration. If you only have one Exo Pool entry, no data is required.
+
+```yaml
+service: exo_pool.reload
+```
+
+To target a specific entry or device:
+
+```yaml
+service: exo_pool.reload
+data:
+  entry_id: 8955375327824e14ba89e4b29cc3ec9a
 ```
 
 ---
