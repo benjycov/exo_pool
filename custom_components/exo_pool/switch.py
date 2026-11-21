@@ -3,7 +3,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from .api import get_coordinator, set_pool_value, DOMAIN
+from .api import get_coordinator, set_heating_value, set_pool_value, DOMAIN
 import logging
 import asyncio
 
@@ -27,6 +27,7 @@ async def async_setup_entry(
         ChlorinatorSwitch(entry, coordinator),
         Aux1Switch(entry, coordinator),
         Aux2Switch(entry, coordinator),
+        HeatingPrioritySwitch(entry, coordinator),
         SWCLowModeSwitch(entry, coordinator),
     ]
     async_add_entities(entities)
@@ -275,15 +276,17 @@ class Aux2Switch(CoordinatorEntity, SwitchEntity):
 
     @property
     def available(self):
-        """Return availability based on coordinator data."""
-        return (
-            self.coordinator.data is not None
-            and "equipment" in self.coordinator.data
-            and "swc_0" in self.coordinator.data["equipment"]
-        )
+        """Return whether Aux 2 is available as a generic relay."""
+        data = self.coordinator.data or {}
+        swc = data.get("equipment", {}).get("swc_0", {})
+        # In heater mode, the top-level heating controls own this output.
+        return bool(swc) and swc.get("aux_2", {}).get("mode") != 3
 
     async def async_turn_on(self):
         """Turn on Aux 2."""
+        if not self.available:
+            _LOGGER.warning("Ignoring Aux 2 switch-on request while it is in heater mode")
+            return
         await set_pool_value(
             self.hass, self._entry, "aux_2.state", 1, delay_refresh=True
         )
@@ -292,11 +295,55 @@ class Aux2Switch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_off(self):
         """Turn off Aux 2."""
+        if not self.available:
+            _LOGGER.warning("Ignoring Aux 2 switch-off request while it is in heater mode")
+            return
         await set_pool_value(
             self.hass, self._entry, "aux_2.state", 0, delay_refresh=True
         )
         self._attr_is_on = False  # Optimistic update
         self.async_write_ha_state()
+
+
+class HeatingPrioritySwitch(CoordinatorEntity, SwitchEntity):
+    """Representation of the heat pump priority-mode switch."""
+
+    _attr_icon = "mdi:heat-pump"
+
+    def __init__(self, entry: ConfigEntry, coordinator):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_name = "Heat Pump Priority"
+        self._attr_unique_id = f"{entry.entry_id}_heating_priority"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": "Exo Pool",
+            "manufacturer": "Zodiac",
+            "model": "Exo",
+        }
+
+    @property
+    def is_on(self) -> bool:
+        """Return whether heat-pump priority mode is enabled."""
+        heating = (self.coordinator.data or {}).get("heating") or {}
+        return bool(heating.get("priority_enabled"))
+
+    @property
+    def available(self) -> bool:
+        """Return whether the controller exposes heating controls."""
+        return isinstance((self.coordinator.data or {}).get("heating"), dict)
+
+    async def async_turn_on(self) -> None:
+        """Enable heat-pump priority mode."""
+        await set_heating_value(
+            self.hass, self._entry, "priority_enabled", 1, delay_refresh=True
+        )
+
+    async def async_turn_off(self) -> None:
+        """Disable heat-pump priority mode."""
+        await set_heating_value(
+            self.hass, self._entry, "priority_enabled", 0, delay_refresh=True
+        )
 
 
 class SWCLowModeSwitch(CoordinatorEntity, SwitchEntity):

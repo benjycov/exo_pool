@@ -77,9 +77,9 @@ A custom integration to connect your Zodiac iAqualink **Exo** pool system to Hom
 - **Real-time MQTT Updates** – Instant state sync via AWS IoT (no polling required)
 - **Sensors** – Temperature, pH, ORP, ORP Boost Time Remaining, Pump RPM, Error Code, Wi-Fi RSSI.
 - **Binary Sensors** – Filter Pump running, Chlorinator running, Error State, Authentication Status, Connected, and one per schedule.
-- **Switches** – ORP Boost, Power State, Production, Aux 1, Aux 2, SWC Low.
+- **Switches** – ORP Boost, Power State, Production, Aux 1, Aux 2 (unavailable in heater mode), Heat Pump Priority, SWC Low.
 - **Numbers** – SWC Output, SWC Low Output, Refresh Interval, plus pH/ORP Set Points when supported.
-- **Climate** – Heat Pump control when Aux 2 is configured for heat mode.
+- **Climate** – Heat Pump control when the controller reports a `heating` section.
 - **Services** – Control and modify schedules (see below).
 - **Diagnostics & Dynamic Device Info** – View hardware configuration and live status; serial number and software version update periodically.
 - **Rest Fallback** - Automatic resilience if MQTT is unavailable.
@@ -213,7 +213,7 @@ After early Node-RED flows and REST template hacks, this dedicated integration w
 - Restricted to **Exo** devices only; use the core iAqualink integration for other hardware.
 - Schedule keys, names and endpoints are determined by the device; disabling a schedule is modelled as `00:00–00:00`.
 - RPM is only relevant to VSP schedules.
-- The heat pump climate entity only appears when Aux 2 is set to heat mode.
+- The heat pump climate entity appears when the controller reports a `heating` section. Its on/off control uses `heating.enabled`; priority mode is available as a separate switch.
 
 ---
 
