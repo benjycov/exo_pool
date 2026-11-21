@@ -12,7 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import get_coordinator, DOMAIN, set_heating_value, set_pool_value
+from .api import get_coordinator, DOMAIN, set_heating_value
 
 import logging
 
@@ -22,7 +22,7 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up climate entity for Exo Pool heat pump (Aux 2 mode heat)."""
+    """Set up climate entity for Exo Pool heat pump (Aux 2 mode heat and heating data present)."""
     coordinator = await get_coordinator(hass, entry)
     created = False
 
@@ -30,7 +30,7 @@ async def async_setup_entry(
         data = coordinator.data or {}
         swc = data.get("equipment", {}).get("swc_0", {})
         aux2 = swc.get("aux_2", {})
-        return aux2.get("mode") == 3
+        return aux2.get("mode") == 3 and isinstance(data.get("heating"), dict)
 
     # Create immediately if present
     if _should_create():
@@ -71,7 +71,7 @@ class ExoHeatPumpClimate(CoordinatorEntity, ClimateEntity):
             "model": "Exo",
         }
 
-    # Availability follows Aux 2 remaining in heat mode
+    # Availability follows Aux 2 remaining in heat mode and the presence of heating data.
     @property
     def available(self) -> bool:
         data = self.coordinator.data or {}
@@ -110,21 +110,13 @@ class ExoHeatPumpClimate(CoordinatorEntity, ClimateEntity):
 
     @property
     def hvac_mode(self) -> HVACMode:
-        data = self.coordinator.data or {}
-        swc = data.get("equipment", {}).get("swc_0", {})
-        aux2 = swc.get("aux_2", {})
-        return HVACMode.HEAT if aux2.get("state") == 1 else HVACMode.OFF
+        heating = (self.coordinator.data or {}).get("heating", {})
+        return HVACMode.HEAT if heating.get("enabled") else HVACMode.OFF
 
     @property
     def hvac_action(self) -> HVACAction | None:
-        # Prefer aux_2.state for run indicator; fall back to heating.state mapping
-        data = self.coordinator.data or {}
-        swc = data.get("equipment", {}).get("swc_0", {})
-        aux2 = swc.get("aux_2", {})
-        if aux2.get("state") == 1:
-            return HVACAction.HEATING
-        state = (data.get("heating", {}) or {}).get("state")
-        return HVACAction.HEATING if state == 2 else HVACAction.IDLE
+        state = ((self.coordinator.data or {}).get("heating", {}) or {}).get("state")
+        return HVACAction.HEATING if state == 1 else HVACAction.IDLE
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -164,9 +156,9 @@ class ExoHeatPumpClimate(CoordinatorEntity, ClimateEntity):
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         if hvac_mode == HVACMode.HEAT:
-            await set_pool_value(self.hass, self._entry, "aux_2.state", 1)
+            await set_heating_value(self.hass, self._entry, "enabled", 1)
         elif hvac_mode == HVACMode.OFF:
-            await set_pool_value(self.hass, self._entry, "aux_2.state", 0)
+            await set_heating_value(self.hass, self._entry, "enabled", 0)
 
     async def async_turn_on(self) -> None:
         await self.async_set_hvac_mode(HVACMode.HEAT)

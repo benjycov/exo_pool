@@ -85,6 +85,16 @@ REAL_REPORTED_STATE = {
         "supported": 5,
         "programmed": 0,
     },
+    "heating": {
+        "enabled": 1,
+        "priority_enabled": 0,
+        "state": 1,
+        "sp": 32,
+        "sp_min": 15,
+        "sp_max": 32,
+        "vsp_rpm_list": {"0": 2400, "1": 2000, "2": 2000, "3": 2850},
+        "vsp_rpm_index": 0,
+    },
 }
 
 
@@ -242,14 +252,16 @@ class TestGetAcceptedDataContract:
         assert swc["swc_low"] == REAL_REPORTED_STATE["equipment"]["swc_0"]["swc_low"]
 
     def test_climate_data_paths_exist(self, get_accepted_data):
-        """climate.py reads from equipment.swc_0 and aux_2."""
+        """climate.py reads water temperature and top-level heating data."""
         swc = get_accepted_data["equipment"]["swc_0"]
+        heating = get_accepted_data["heating"]
 
         # Climate reads water temp for current_temperature
         assert swc["sns_3"]["value"] == 22
 
-        # Climate reads aux_2.mode to decide visibility
-        assert swc["aux_2"]["mode"] == 0  # not heat mode, so climate won't show
+        assert heating["enabled"] == 1
+        assert heating["priority_enabled"] == 0
+        assert heating["sp"] == 32
 
 
 class TestUpdateDocumentsDataContract:
@@ -370,6 +382,27 @@ class TestPublishDesiredContract:
             "state": {
                 "desired": {
                     "heating": {"sp": 28},
+                },
+            },
+        }
+
+    def test_heating_priority_write_shape(self, connected_client):
+        """Priority mode writes to the top-level heating section."""
+        client, mock_conn, _ = connected_client
+
+        client.publish_desired({"heating": {"priority_enabled": 1}})
+
+        pub_calls = [
+            c for c in mock_conn.publish.call_args_list
+            if (c.kwargs.get("topic") or c.args[0]).endswith("/shadow/update")
+        ]
+        assert len(pub_calls) == 1
+
+        payload = json.loads(pub_calls[0].kwargs.get("payload") or pub_calls[0].args[1])
+        assert payload == {
+            "state": {
+                "desired": {
+                    "heating": {"priority_enabled": 1},
                 },
             },
         }
